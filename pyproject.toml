@@ -46,3 +46,32 @@ Issues = "https://github.com/tommatsuda/pybnlearn/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.cibuildwheel]
+# 3.10 is the floor set by requires-python; PyPy has no NumPy/pandas story
+# worth supporting here, and the 32-bit targets cannot host a sane BLAS.
+build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_i686 *_i686 *-win32 pp*"
+
+build-frontend = "build"
+test-requires = "pytest"
+test-sources = ["tests"]
+# The parity fixtures are committed, so CI checks the numbers against R
+# without needing R installed.
+test-command = "pytest {project}/tests -q"
+
+[tool.cibuildwheel.linux]
+# manylinux_2_28 has a recent enough gfortran and OpenBLAS.
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+before-all = "dnf install -y gcc-gfortran openblas-devel"
+
+[tool.cibuildwheel.macos]
+before-all = "brew install gfortran openblas"
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+
+# Windows is not built yet.  bnlearn reaches for two LINPACK routines that R
+# ships only as Fortran (dqrdc2, dqrsl), and getting a Fortran toolchain and a
+# BLAS lined up under MSVC is a project of its own.  Translating those two
+# routines to C removes the Fortran dependency altogether and is the intended
+# fix; see the note in NOTICE.

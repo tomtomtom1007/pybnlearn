@@ -2,6 +2,7 @@
 build/
 builddir/
 dist/
+wheelhouse/
 *.so
 *.o
 *.a
