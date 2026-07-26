@@ -61,17 +61,20 @@ test-sources = ["tests"]
 test-command = "pytest {project}/tests -q"
 
 [tool.cibuildwheel.linux]
-# manylinux_2_28 has a recent enough gfortran and OpenBLAS.
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-all = "dnf install -y gcc-gfortran openblas-devel"
+before-all = "dnf install -y openblas-devel"
 
 [tool.cibuildwheel.macos]
-before-all = "brew install gfortran openblas"
+before-all = "brew install openblas"
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 
-# Windows is not built yet.  bnlearn reaches for two LINPACK routines that R
-# ships only as Fortran (dqrdc2, dqrsl), and getting a Fortran toolchain and a
-# BLAS lined up under MSVC is a project of its own.  Translating those two
-# routines to C removes the Fortran dependency altogether and is the intended
-# fix; see the note in NOTICE.
+# Windows has no system BLAS, so the build takes the one SciPy ships as a
+# wheel -- the same approach NumPy and SciPy use for their own builds.  There
+# is no Fortran involved any more: R's two LINPACK routines are translated to
+# C in src/c/linpack/, checked against the originals by
+# tools/check_linpack.sh.
+[tool.cibuildwheel.windows]
+before-build = "pip install delvewheel scipy-openblas64 && python -c \"import scipy_openblas64, pathlib; pathlib.Path('openblas.pc').write_text(scipy_openblas64.get_pkg_config())\""
+environment = { PKG_CONFIG_PATH = "." }
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"

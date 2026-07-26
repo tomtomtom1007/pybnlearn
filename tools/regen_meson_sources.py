@@ -49,6 +49,7 @@ nmath_lib = static_library(
 linpack_lib = static_library(
   'pybn_linpack',
   linpack_sources,
+  dependencies: [m_dep],
   pic: true,
 )
 
@@ -85,7 +86,7 @@ def main():
     compat = listing("compat/*.c")
     rsupport = listing("rsupport/qsort.c")
     nmath = listing("nmath/*.c")
-    linpack = listing("linpack/*.f")
+    linpack = listing("linpack/*.c")
 
     if not bnlearn or not nmath:
         sys.exit("vendored sources are missing; run tools/fetch_upstream.sh")

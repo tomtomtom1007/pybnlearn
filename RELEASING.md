@@ -80,12 +80,14 @@ Be aware of what is and is not tested, before tagging a release:
 
 | | |
 |---|---|
-| macOS arm64 wheel via `python -m build` | built, installed into a clean venv, all 413 tests pass |
-| sdist contents | 140 bnlearn sources, 120 nmath sources, both Fortran files, LICENSE and NOTICE present |
+| macOS arm64 wheel via `python -m build` | built, installed into a clean venv, the whole suite passes |
+| sdist contents | the vendored bnlearn, nmath and LINPACK sources, LICENSE and NOTICE present |
 | `twine check` | passes for both artefacts |
 | cibuildwheel configuration | parses; `before-all` runs; the build itself stops locally because cibuildwheel will not install python.org CPython outside CI |
-| **Linux wheels** | **never built** — no container runtime was available on the development machine, so `manylinux_2_28` plus the `dnf install gcc-gfortran openblas-devel` step is unexercised |
+| C translation of dqrdc2/dqrsl | agrees with the Fortran bit for bit over 60 cases including rank-deficient ones (`tools/check_linpack.sh`) |
+| **Linux wheels** | **never built** — no container runtime was available on the development machine, so `manylinux_2_28` plus the `dnf install openblas-devel` step is unexercised |
 | **macOS x86-64 wheels** | **never built** — no Intel machine |
+| **Windows wheels** | **never built** — no Windows machine; the `scipy-openblas64` and `delvewheel` steps are unexercised |
 | Trusted Publishing | configuration written, never run |
 
 The first CI run is therefore the real test of the Linux path. Push a tag to a
@@ -94,9 +96,10 @@ tagging anything you intend to publish.
 
 ## Known packaging limitations
 
-* **No Windows wheels.** bnlearn calls two LINPACK routines that R ships only
-  as Fortran (`dqrdc2`, `dqrsl`), and lining up a Fortran toolchain with MSVC
-  is a project of its own. Translating those two routines to C removes the
-  Fortran dependency on every platform, and is the intended fix; nothing
-  currently exposed in the Python API reaches them.
-* Installing from the sdist needs a C compiler, gfortran and a BLAS/LAPACK.
+* Windows wheels are configured but have never been built. There is no
+  Fortran anywhere any more — R's `dqrdc2` and `dqrsl` are translated to C in
+  `src/c/linpack/` — but Windows has no system BLAS, so the build pulls in the
+  one SciPy ships as a wheel. Expect that step to need iteration on the first
+  CI run.
+* Installing from the sdist needs a C compiler and a BLAS/LAPACK. gfortran is
+  no longer required.

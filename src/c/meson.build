@@ -290,10 +290,9 @@ nmath_sources = files(
 )
 
 linpack_sources = files(
-  'linpack/dqrdc2.f',
-  'linpack/dqrsl.f',
+  'linpack/dqrdc2.c',
+  'linpack/dqrsl.c',
 )
-
 
 nmath_lib = static_library(
   'pybn_nmath',
@@ -307,6 +306,7 @@ nmath_lib = static_library(
 linpack_lib = static_library(
   'pybn_linpack',
   linpack_sources,
+  dependencies: [m_dep],
   pic: true,
 )
 
@@ -323,4 +323,3 @@ pybn_core_dep = declare_dependency(
   include_directories: compat_inc,
   dependencies: [lapack, blas, m_dep],
 )
-

@@ -1,6 +1,6 @@
 project(
   'pybnlearn',
-  'c', 'fortran',
+  'c',
   version: '0.1.0.dev0',
   license: 'GPL-3.0-or-later',
   meson_version: '>=1.1.0',
@@ -27,11 +27,23 @@ np_inc_args = ['-I' + incdir_numpy]
 lapack = dependency('lapack', required: false)
 blas = dependency('blas', required: false)
 if not lapack.found()
+  # OpenBLAS provides both in one library, under either of these names; the
+  # second is what the scipy-openblas wheels install, which is how the Windows
+  # build gets a BLAS at all.
+  lapack = dependency('openblas', required: false)
+  blas = declare_dependency()
+endif
+if not lapack.found()
+  lapack = dependency('scipy-openblas', required: false)
+  blas = declare_dependency()
+endif
+if not lapack.found()
   if host_machine.system() == 'darwin'
     lapack = declare_dependency(link_args: ['-framework', 'Accelerate'])
     blas = declare_dependency()
   else
-    error('no LAPACK found; install one (e.g. libopenblas-dev) and retry')
+    error('no BLAS/LAPACK found; install one (libopenblas-dev, openblas-devel, '
+          + 'or the scipy-openblas64 wheel) and retry')
   endif
 endif
 

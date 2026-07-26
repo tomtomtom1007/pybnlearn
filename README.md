@@ -137,8 +137,9 @@ afresh on each iteration of the search. Memory is flat across repeated runs.
 
 ## Building from source
 
-Needs a C compiler, gfortran (until R's LINPACK QR routines are translated to
-C), and a BLAS/LAPACK.
+Needs a C compiler and a BLAS/LAPACK. No Fortran: R's `dqrdc2` and `dqrsl`
+are translated to C in `src/c/linpack/`, and `tools/check_linpack.sh` checks
+the translation against the Fortran original bit for bit.
 
 ```bash
 pip install -e . --no-build-isolation

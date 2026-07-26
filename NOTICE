@@ -33,6 +33,14 @@ library of R (`src/nmath/` in the R distribution):
     Copyright (C) 1998 Ross Ihaka
     Licence: GPL-2 | GPL-3
 
+`src/c/linpack/dqrdc2.c` and `src/c/linpack/dqrsl.c` are C translations of
+R's `src/appl/dqrdc2.f` and `src/appl/dqrsl.f`, under the same copyright and
+licence.  They are translated rather than replaced with LAPACK equivalents
+because dqrdc2 is R's own modification of LINPACK's dqrdc, with a column
+pivoting rule that decides which columns a rank-deficient fit drops; no LAPACK
+routine pivots the same way.  tools/check_linpack.sh compares the translation
+against the Fortran.
+
 These files are vendored so that pybnlearn reproduces R's numerical results
 (distribution functions and the Mersenne-Twister random number stream)
 bit-for-bit, which is what makes the parity test suite meaningful.
