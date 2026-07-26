@@ -1,0 +1,28 @@
+# build artefacts (keep these out of Google Drive sync as well)
+build/
+builddir/
+dist/
+*.so
+*.o
+*.a
+*.dylib
+*.pyd
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.venv/
+
+# Cython generated sources
+src/pybnlearn/**/*.c
+!src/c/**
+
+# upstream tarballs, re-fetched on demand; the parts that ship live under
+# src/c/ and are tracked.
+vendor/
+
+# The parity fixtures ARE tracked: they are what lets CI check results against
+# R without having R installed. Regenerate with tools/gen_r_fixtures.R.
+
+# local editor and tool state
+.claude/settings.local.json
+.DS_Store

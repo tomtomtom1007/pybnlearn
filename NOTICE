@@ -1,0 +1,51 @@
+pybnlearn
+=========
+
+pybnlearn is a Python port of the R package `bnlearn`.
+
+Upstream work
+-------------
+
+The numerical core of this project is derived from, and largely consists of,
+C source code vendored from the R package `bnlearn`:
+
+    bnlearn: Bayesian Network Structure Learning, Parameter Learning and Inference
+    Version 5.2.1 (2026-07-17)
+    Copyright (C) 2007-2026 Marco Scutari <scutari@bnlearn.com>
+    Contributor: Tomi Silander
+    Homepage: https://www.bnlearn.com/
+    CRAN: https://cran.r-project.org/package=bnlearn
+    Licence: GPL-2 | GPL-3
+
+    Source archive vendored by this project:
+      bnlearn_5.2.1.tar.gz
+      sha256 c61c05842a758a2c1f71521fbe37aa698838d986a5a9909fcf96b41f3e4c1ddd
+
+The vendored C sources live under `src/c/bnlearn/` and are kept as close to
+upstream as possible; see `src/c/compat/` for the compatibility layer that
+lets them build without R.
+
+Portions of `src/c/nmath/` are derived from the standalone mathematical
+library of R (`src/nmath/` in the R distribution):
+
+    R: A Language and Environment for Statistical Computing
+    Copyright (C) 1995-2026 The R Core Team and contributors
+    Copyright (C) 1998 Ross Ihaka
+    Licence: GPL-2 | GPL-3
+
+These files are vendored so that pybnlearn reproduces R's numerical results
+(distribution functions and the Mersenne-Twister random number stream)
+bit-for-bit, which is what makes the parity test suite meaningful.
+
+Licence
+-------
+
+Because pybnlearn is a derivative work of `bnlearn`, it is distributed under
+the GNU General Public License version 3 or later. See the LICENSE file.
+
+pybnlearn is not affiliated with, nor endorsed by, the authors of `bnlearn`
+or the R Core Team.
+
+This project is unrelated to the PyPI package named `bnlearn`
+(https://pypi.org/project/bnlearn/), which is a separate MIT-licensed project
+by Erdogan Taskesen built on pgmpy.
