@@ -22,9 +22,10 @@ import math
 import numpy as np
 import pandas as pd
 
-from ._core import Search, topological_order
+from ._core import Search, alpha_star_value, topological_order
 
-__all__ = ["BayesianNetwork", "hc", "score", "tabu"]
+__all__ = ["BF", "BayesianNetwork", "alpha_star", "blacklist", "hc",
+           "ntests", "score", "tabu", "whitelist"]
 
 
 # Scores that are score-equivalent, and so let the search reuse the cached
@@ -691,3 +692,68 @@ def tabu(data, start=None, whitelist=None, blacklist=None, score=None,
             "iterations": iterations,
         },
     )
+
+
+def alpha_star(network, data):
+    """The imaginary sample size that makes BDe as close as possible to the
+    empirical distribution.
+
+    A BDe score needs one, and the usual answer is to pick a small number and
+    hope; this computes the one that fits the data at hand.
+    """
+    _check_complete(data)
+
+    nodes = [str(c) for c in data.columns]
+    if set(nodes) != set(network.nodes):
+        raise ValueError("the network and the data have different variables")
+    if _data_type(data) != "discrete":
+        raise ValueError("alpha_star() needs discrete data")
+
+    present = set(network.arcs)
+    if any((b, a) in present for a, b in present):
+        raise ValueError("the graph is only partially directed")
+
+    return alpha_star_value(network.nodes, network.arcs, data)
+
+
+def BF(num, den, data, type=None, log=True, **extra_args):
+    """The Bayes factor between two networks.
+
+    How much more the data support one structure than the other, which for a
+    Bayesian score is just the difference of the two scores -- the marginal
+    likelihoods are what those scores already are.
+    """
+    if set(num.nodes) != set(den.nodes):
+        raise ValueError("the two networks have different node sets")
+
+    if type is None:
+        type = {"discrete": "bde", "continuous": "bge",
+                "mixed-cg": "bic-cg"}[_data_type(data)]
+
+    difference = (score(num, data, type=type, **extra_args)
+                  - score(den, data, type=type, **extra_args))
+
+    if log:
+        return difference
+
+    # the Bayes factor of two networks that disagree at all is enormous, and
+    # R returns Inf rather than failing.
+    try:
+        return math.exp(difference)
+    except OverflowError:
+        return math.inf if difference > 0 else 0.0
+
+
+def whitelist(network):
+    """The arcs the search was told to keep, if it was told anything."""
+    return list(network.learning.get("whitelist") or [])
+
+
+def blacklist(network):
+    """The arcs the search was told to avoid, if it was told anything."""
+    return list(network.learning.get("blacklist") or [])
+
+
+def ntests(network):
+    """How many tests or scores the search evaluated."""
+    return network.learning.get("ntests")

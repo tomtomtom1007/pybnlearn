@@ -2379,3 +2379,273 @@ def node_structure(node_names, arcs):
         return _sexp_to_py(_guarded(<void *>cache_structure, a3, 3))
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# colliders, structural intervention distance, random graphs, discretization
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP colliders(SEXP arcs, SEXP nodes, SEXP return_arcs,
+    SEXP shielded, SEXP unshielded, SEXP debug)
+cdef extern SEXP sid(SEXP learned, SEXP true_graph, SEXP debug)
+cdef extern SEXP alpha_star(SEXP x, SEXP data, SEXP debug)
+cdef extern SEXP ordered_graph(SEXP nodes, SEXP num, SEXP prob)
+cdef extern SEXP ide_cozman_graph(SEXP nodes, SEXP num, SEXP burn_in,
+    SEXP max_in_degree, SEXP max_out_degree, SEXP max_degree, SEXP connected,
+    SEXP debug)
+cdef extern SEXP marginal_discretize(SEXP data, SEXP method, SEXP breaks,
+    SEXP ordered, SEXP debug)
+cdef extern SEXP joint_discretize(SEXP data, SEXP method, SEXP breaks,
+    SEXP ordered, SEXP initial_discretization, SEXP initial_breaks,
+    SEXP debug)
+cdef extern SEXP configurations(SEXP data, SEXP factor, SEXP all)
+
+
+def collider_triples(node_names, arcs, bint shielded=True,
+                     bint unshielded=True):
+    """colliders(): the (X, Y, Z) triples where X and Y both point at Z.
+
+    A collider is *shielded* when X and Y are themselves adjacent, which is
+    what decides whether it constrains the equivalence class.
+    """
+    cdef SEXP a[6]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
+        a[1] = _str_vector(node_names)
+        a[2] = Rf_ScalarLogical(0)
+        a[3] = Rf_ScalarLogical(1 if shielded else 0)
+        a[4] = Rf_ScalarLogical(1 if unshielded else 0)
+        a[5] = Rf_ScalarLogical(0)
+        return _string_matrix_rows(_guarded(<void *>colliders, a, 6), 3)
+    finally:
+        pybn_arena_pop()
+
+
+cdef object _string_matrix_rows(SEXP x, int ncol):
+    """A character matrix, read row by row.
+
+    The C returns an n x 3 matrix rather than a data frame, and R stores a
+    matrix column-major, so the rows have to be gathered by stride.
+    """
+    cdef int n = Rf_length(x) // ncol if ncol else 0
+    cdef int i, j
+    return [tuple(CHAR(Rf_STRING_ELT(x, j * n + i)).decode("utf-8")
+                  for j in range(ncol))
+            for i in range(n)]
+
+
+def intervention_distance(node_names, learned_arcs, true_arcs):
+    """sid(): the structural intervention distance between two graphs.
+
+    How often the learned graph's parent sets would give the wrong answer
+    for an intervention, which is a different question from how many arcs it
+    got wrong.
+    """
+    cdef SEXP a[3]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _bn_object(node_names, learned_arcs)
+        a[1] = _bn_object(node_names, true_arcs)
+        a[2] = Rf_ScalarLogical(0)
+        return _sexp_to_py(_guarded(<void *>sid, a, 3))
+    finally:
+        pybn_arena_pop()
+
+
+def alpha_star_value(node_names, arcs, data):
+    """alpha_star(): the imaginary sample size that makes BDe agree with the
+    empirical distribution as closely as possible."""
+    cdef SEXP a[3]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _bn_object(node_names, arcs)
+        a[1] = _dataframe(data)
+        a[2] = Rf_ScalarLogical(0)
+        return float(_sexp_to_py(_guarded(<void *>alpha_star, a, 3)))
+    finally:
+        pybn_arena_pop()
+
+
+cdef object _graph_list(SEXP result, object node_names, int num):
+    """One generated graph comes back as a bn object, several as a list of
+    them; both are reduced to arc lists here.
+
+    The element is found by name rather than by position: the generators
+    build a full bn structure, whose layout is not the two-element one
+    _bn_object() makes.
+    """
+    cdef int i, j
+    cdef SEXP entry
+
+    if num == 1:
+        return [_arcs_from_sexp(_element(result, "arcs"))]
+
+    return [_arcs_from_sexp(_element(Rf_VECTOR_ELT(result, i), "arcs"))
+            for i in range(Rf_length(result))]
+
+
+cdef SEXP _element(SEXP x, object name) except? NULL:
+    """One named element of a list."""
+    cdef int i
+    names = _names_of(x) or []
+    for i, key in enumerate(names):
+        if key == name:
+            return Rf_VECTOR_ELT(x, i)
+    raise KeyError(f"the R object has no element {name!r}")
+
+
+def ordered_graphs(node_names, int num, double prob):
+    """ordered_graph(): random DAGs over a fixed node ordering, each arc
+    that the ordering allows included with probability `prob`."""
+    cdef SEXP a[3]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _str_vector(node_names)
+        a[1] = Rf_ScalarInteger(num)
+        a[2] = Rf_ScalarReal(prob)
+        return _graph_list(_guarded(<void *>ordered_graph, a, 3),
+                           node_names, num)
+    finally:
+        pybn_arena_pop()
+
+
+def ide_cozman_graphs(node_names, int num, int burn_in, double max_in_degree,
+                      double max_out_degree, double max_degree,
+                      bint connected):
+    """ide_cozman_graph(): the Ide-Cozman / Melancon Markov chain over DAGs,
+    which samples them uniformly rather than by an ordering."""
+    cdef SEXP a[8]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _str_vector(node_names)
+        a[1] = Rf_ScalarInteger(num)
+        a[2] = Rf_ScalarInteger(burn_in)
+        a[3] = Rf_ScalarReal(max_in_degree)
+        a[4] = Rf_ScalarReal(max_out_degree)
+        a[5] = Rf_ScalarReal(max_degree)
+        a[6] = Rf_ScalarLogical(1 if connected else 0)
+        a[7] = Rf_ScalarLogical(0)
+        return _graph_list(_guarded(<void *>ide_cozman_graph, a, 8),
+                           node_names, num)
+    finally:
+        pybn_arena_pop()
+
+
+def discretize_marginal(data, method, breaks, ordered):
+    """marginal_discretize(): cut each variable up on its own."""
+    cdef SEXP a[5]
+    cdef SEXP nbreaks, flags
+    cdef int i
+
+    breaks = [int(b) for b in breaks]
+    ordered = [bool(o) for o in ordered]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = _str_vector([str(method)])
+        nbreaks = Rf_allocVector(INTSXP, len(breaks))
+        flags = Rf_allocVector(LGLSXP, len(ordered))
+        for i in range(len(breaks)):
+            INTEGER(nbreaks)[i] = breaks[i]
+            LOGICAL(flags)[i] = 1 if ordered[i] else 0
+        a[2] = nbreaks
+        a[3] = flags
+        a[4] = Rf_ScalarLogical(0)
+        return _dataframe_to_py(
+            _guarded(<void *>marginal_discretize, a, 5))
+    finally:
+        pybn_arena_pop()
+
+
+def discretize_joint(data, method, breaks, ordered, initial, initial_breaks):
+    """joint_discretize(): cut the variables up together, so that the
+    breakpoints of one can depend on another.
+
+    `initial_breaks` is a vector with one entry per column, not a scalar:
+    the C code indexes it per variable, so a scalar reads past the end of it
+    and the discretization then runs on garbage.
+    """
+    cdef SEXP a[7]
+    cdef SEXP nbreaks, flags, ibreaks
+    cdef int i
+
+    breaks = [int(b) for b in breaks]
+    ordered = [bool(o) for o in ordered]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = _str_vector([str(method)])
+        nbreaks = Rf_allocVector(INTSXP, len(breaks))
+        flags = Rf_allocVector(LGLSXP, len(ordered))
+        for i in range(len(breaks)):
+            INTEGER(nbreaks)[i] = breaks[i]
+            LOGICAL(flags)[i] = 1 if ordered[i] else 0
+        a[2] = nbreaks
+        a[3] = flags
+        a[4] = _str_vector([str(initial)])
+        ibreaks = Rf_allocVector(INTSXP, len(initial_breaks))
+        for i in range(len(initial_breaks)):
+            INTEGER(ibreaks)[i] = int(initial_breaks[i])
+        a[5] = ibreaks
+        a[6] = Rf_ScalarLogical(0)
+        return _dataframe_to_py(_guarded(<void *>joint_discretize, a, 7))
+    finally:
+        pybn_arena_pop()
+
+
+def configuration_factor(data, bint all=True):
+    """configurations(): the joint configuration of several discrete
+    variables, as a single factor."""
+    cdef SEXP a[3]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = Rf_ScalarLogical(1)
+        a[2] = Rf_ScalarLogical(1 if all else 0)
+        return _read_column(_guarded(<void *>configurations, a, 3))
+    finally:
+        pybn_arena_pop()
+
+
+cdef extern SEXP unique_arcs(SEXP arcs, SEXP nodes, SEXP warn)
+
+
+def deduplicate_arcs(arcs, node_names):
+    """unique_arcs(): drop repeated arcs and put the rest in R's order."""
+    cdef SEXP a[3]
+    node_names = [str(v) for v in node_names]
+
+    if not arcs:
+        return []
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs)
+        a[1] = _str_vector(node_names)
+        a[2] = Rf_ScalarLogical(0)
+        return _arcs_from_sexp(_guarded(<void *>unique_arcs, a, 3))
+    finally:
+        pybn_arena_pop()

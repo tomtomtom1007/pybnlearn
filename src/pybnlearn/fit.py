@@ -20,7 +20,8 @@ from ._core import (conditional_gaussian_parameters,
 from .structure import _check_complete, _data_type, is_discrete_column
 
 __all__ = ["ConditionalGaussianNode", "DiscreteNode", "FittedNetwork",
-           "GaussianNode", "bn_net", "custom_fit", "fit", "predict"]
+           "GaussianNode", "bn_net", "custom_fit", "fit", "identifiable",
+           "predict", "singular"]
 
 
 class DiscreteNode:
@@ -610,3 +611,54 @@ def bn_net(fitted):
     from .nodes import _graph
 
     return _graph(fitted)
+
+
+def identifiable(fitted, by_node=False):
+    """Whether every parameter could be estimated.
+
+    A conditional distribution with no observations behind it comes back as
+    NaN rather than as an error, so a fitted network can look complete and
+    have holes in it.  This is how you find out.
+    """
+    if not isinstance(fitted, FittedNetwork):
+        raise TypeError("identifiable() needs a fitted network")
+
+    per_node = {}
+    for node in fitted.nodes:
+        entry = fitted[node]
+        if isinstance(entry, DiscreteNode):
+            per_node[node] = bool(np.isfinite(entry.probabilities).all())
+        else:
+            coefficients = np.asarray(
+                list(entry.coefficients.values())
+                if isinstance(entry.coefficients, dict)
+                else entry.coefficients, dtype=float)
+            per_node[node] = bool(np.isfinite(coefficients).all()
+                                  and np.isfinite(entry.sd).all())
+
+    return per_node if by_node else all(per_node.values())
+
+
+def singular(fitted, by_node=False):
+    """Whether any local distribution is degenerate.
+
+    A discrete node is singular when some conditional distribution puts all
+    its mass on one level; a Gaussian one when its residual variance is
+    zero.  Either makes the node deterministic given its parents, which
+    breaks anything that divides by a variance.
+    """
+    if not isinstance(fitted, FittedNetwork):
+        raise TypeError("singular() needs a fitted network")
+
+    per_node = {}
+    for node in fitted.nodes:
+        entry = fitted[node]
+        if isinstance(entry, DiscreteNode):
+            flat = entry.probabilities.reshape(entry.probabilities.shape[0],
+                                               -1)
+            per_node[node] = bool(
+                np.isin(flat, (0.0, 1.0)).all(axis=0).any())
+        else:
+            per_node[node] = bool((np.atleast_1d(entry.sd) == 0).any())
+
+    return per_node if by_node else any(per_node.values())

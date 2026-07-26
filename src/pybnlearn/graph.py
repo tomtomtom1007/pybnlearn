@@ -15,6 +15,8 @@ import re
 from ._core import (chow_liu_arcs, aracne_arcs, components, count_parameters,
                     cpdag_arcs, extend_pdag, structural_hamming,
                     tier_blacklist, topological_order, undirected_arcs)
+from ._core import (collider_triples, consistent_extension, deduplicate_arcs,
+                    ide_cozman_graphs, intervention_distance, ordered_graphs)
 from ._core import acyclic as _acyclic
 from ._core import path_exists as _path_exists
 from .structure import BayesianNetwork, _data_type, build_blacklist
@@ -23,6 +25,8 @@ __all__ = [
     "aracne", "chow_liu", "compare", "cpdag", "empty_graph", "hamming",
     "model2network", "moral", "nparams", "pdag2dag", "shd", "skeleton",
     "subgraph",
+    "cextend", "colliders", "complete_graph", "dsep", "random_graph",
+    "shielded_colliders", "sid", "unshielded_colliders", "vstructs",
     "acyclic", "connected_components", "directed", "leaf_nodes",
     "node_ordering", "ordering2blacklist", "path_exists", "root_nodes",
     "set2blacklist", "tiers2blacklist", "valid_cpdag", "valid_dag",
@@ -480,3 +484,206 @@ def set2blacklist(nodes):
     # expand.grid() varies the first factor fastest, so the arcs come out
     # grouped by their target rather than by their source.
     return [(a, b) for b in nodes for a in nodes if a != b]
+
+
+# ---------------------------------------------------------------------------
+# colliders, d-separation and consistent extensions
+# ---------------------------------------------------------------------------
+
+def colliders(x, arcs=False):
+    """Every triple where two nodes both point at a third.
+
+    Set `arcs` to get the arcs that make up the colliders instead of the
+    triples.
+    """
+    return _colliders(x, arcs, shielded=True, unshielded=True)
+
+
+def unshielded_colliders(x, arcs=False):
+    """The colliders whose two parents are *not* themselves adjacent.
+
+    These are the v-structures: the ones that constrain the equivalence
+    class, because they are the only colliders the data can see.
+    """
+    return _colliders(x, arcs, shielded=False, unshielded=True)
+
+
+def shielded_colliders(x, arcs=False):
+    """The colliders whose two parents are adjacent, and which therefore say
+    nothing about the equivalence class."""
+    return _colliders(x, arcs, shielded=True, unshielded=False)
+
+
+def vstructs(x, arcs=False):
+    """An alias for `unshielded_colliders`, as in R."""
+    return unshielded_colliders(x, arcs=arcs)
+
+
+def _colliders(x, as_arcs, shielded, unshielded):
+    net = _as_graph(x)
+    triples = collider_triples(net.nodes, net.arcs, shielded=shielded,
+                               unshielded=unshielded)
+
+    if not as_arcs:
+        return triples
+
+    # each collider contributes its two arcs, but R stacks all the first
+    # parents' arcs and then all the second parents' rather than pairing
+    # them up, and only then removes duplicates.  The order survives.
+    out = ([(a, middle) for a, middle, _ in triples]
+           + [(b, middle) for _, middle, b in triples])
+    return deduplicate_arcs(out, net.nodes)
+
+
+def dsep(bn, x, y, z=None):
+    """Whether two nodes are d-separated by a set of others.
+
+    This is the graphical counterpart of conditional independence: if it
+    holds, then every distribution the graph can represent makes x and y
+    independent given z.
+
+    The implementation is Koller and Friedman's, section 4.5: take the upper
+    closure of the nodes involved, moralise it, remove z, and look for a
+    path.  A partially directed graph is extended to a DAG first.
+    """
+    net = _as_graph(bn)
+    x, y = str(x), str(y)
+    z = [str(v) for v in (z or ())]
+
+    for node in [x, y] + z:
+        if node not in net.nodes:
+            raise ValueError(f"unknown node {node!r}")
+
+    # a node in the conditioning set is trivially separated from everything.
+    if x in z or y in z:
+        return True
+
+    if not directed(net):
+        net = cextend(net)
+
+    from .nodes import ancestors
+
+    closure = set()
+    for node in [x, y] + z:
+        closure.add(node)
+        closure.update(ancestors(net, node))
+
+    upper = subgraph(net, [n for n in net.nodes if n in closure])
+    moralised = moral(upper)
+
+    kept = [n for n in moralised.nodes if n not in z]
+    blocked = subgraph(moralised, kept)
+
+    return not path_exists(blocked, x, y)
+
+
+def cextend(x, strict=True):
+    """A DAG in the equivalence class the graph describes.
+
+    Orienting the undirected arcs of a CPDAG without creating a cycle or a
+    new v-structure; there is not always one, and `strict` decides whether
+    that is an error or a partially directed answer.
+    """
+    net = _as_graph(x)
+
+    if not acyclic(net, directed=True):
+        raise ValueError("the specified network contains cycles")
+
+    # pdag_extension(), not pdag2dag(): the first is Dor and Tarsi's
+    # algorithm, which orients what it can without creating a v-structure,
+    # while the second imposes a node ordering and would give a different
+    # DAG from the same equivalence class.
+    extended = BayesianNetwork(
+        net.nodes, consistent_extension(net.arcs, net.nodes),
+        dict(net.learning))
+
+    if strict and not directed(extended):
+        raise ValueError("no consistent extension of the graph is possible")
+
+    return extended
+
+
+def sid(learned, true):
+    """Structural intervention distance.
+
+    How many of the ordered pairs of nodes the learned graph would give the
+    wrong intervention distribution for -- which is a different question
+    from how many arcs it got wrong, and the reason two graphs with the same
+    Hamming distance can be very differently useful.
+    """
+    learned, true = _as_graph(learned), _as_graph(true)
+    if set(learned.nodes) != set(true.nodes):
+        raise ValueError("the two networks have different node sets")
+
+    # the C code indexes both graphs by position, so they have to agree.
+    ordered = BayesianNetwork(true.nodes, learned.arcs, learned.learning)
+    return int(intervention_distance(true.nodes, ordered.arcs, true.arcs))
+
+
+# ---------------------------------------------------------------------------
+# generating graphs
+# ---------------------------------------------------------------------------
+
+def complete_graph(nodes):
+    """The DAG with every arc the node ordering allows."""
+    nodes = [str(n) for n in nodes]
+    return BayesianNetwork(nodes, tier_blacklist(list(reversed(nodes))),
+                           {"algo": "complete"})
+
+
+def random_graph(nodes, num=1, method="ordered", prob=None, burn_in=None,
+                 every=1, max_in_degree=float("inf"),
+                 max_out_degree=float("inf"), max_degree=float("inf")):
+    """Random DAGs, drawn the way R draws them.
+
+    Two families, and they are not interchangeable.  "ordered" fixes the
+    node ordering and includes each arc it allows independently, which is
+    fast but samples DAGs non-uniformly.  "ic-dag" and "melancon" run the
+    Ide-Cozman Markov chain, which samples uniformly over connected and over
+    all DAGs respectively, at the cost of a burn-in.
+
+    Seed with `set_seed()`; the draws come from R's generator, so the same
+    seed gives the same graphs R gives.
+    """
+    nodes = [str(n) for n in nodes]
+    num = int(num)
+    if num < 1:
+        raise ValueError("the number of graphs must be a positive integer")
+
+    if method == "empty":
+        return _one_or_many([[] for _ in range(num)], nodes, method)
+
+    if method == "ordered":
+        if prob is None:
+            # this default gives about as many arcs as there are nodes.
+            prob = 2 / (len(nodes) - 1) if len(nodes) > 1 else 0.0
+        if not 0 <= prob <= 1:
+            raise ValueError("the branching probability must be in [0, 1]")
+        return _one_or_many(ordered_graphs(nodes, num, float(prob)), nodes,
+                            method)
+
+    if method not in ("ic-dag", "melancon"):
+        raise ValueError(
+            "method must be 'ordered', 'ic-dag', 'melancon' or 'empty'")
+
+    if burn_in is None:
+        # the magic number comes from the reference implementation.
+        burn_in = 6 * len(nodes) ** 2
+    every = int(every)
+    if every < 1:
+        raise ValueError("the thinning factor must be a positive integer")
+
+    generated = ide_cozman_graphs(
+        nodes, num * every, int(burn_in), float(max_in_degree),
+        float(max_out_degree), float(max_degree), method == "ic-dag")
+
+    if every > 1:
+        generated = generated[every - 1::every]
+
+    return _one_or_many(generated, nodes, method)
+
+
+def _one_or_many(arc_sets, nodes, method):
+    graphs = [BayesianNetwork(nodes, arcs, {"algo": method})
+              for arcs in arc_sets]
+    return graphs[0] if len(graphs) == 1 else graphs

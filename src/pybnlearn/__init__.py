@@ -12,18 +12,22 @@ from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
 from .exact import Factor, query
 from .fit import (ConditionalGaussianNode, DiscreteNode, FittedNetwork,
-                  GaussianNode, bn_net, custom_fit, fit, predict)
+                  GaussianNode, bn_net, custom_fit, fit, identifiable,
+                  predict, singular)
 from .foreign import (read_bif, read_dsc, read_net, write_bif,
                       write_dot, write_dsc, write_net)
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
 from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
-from .graph import (acyclic, aracne, chow_liu, compare, connected_components,
-                    cpdag, directed, empty_graph, hamming, leaf_nodes,
+from .graph import (acyclic, aracne, cextend, chow_liu, colliders, compare,
+                    complete_graph, connected_components, cpdag, directed,
+                    dsep, empty_graph, hamming, leaf_nodes,
                     model2network, moral, node_ordering, nparams,
                     ordering2blacklist, path_exists, pdag2dag, root_nodes,
-                    set2blacklist, shd, skeleton, subgraph, tiers2blacklist,
-                    valid_cpdag, valid_dag, valid_ug)
+                    random_graph, set2blacklist, shd, shielded_colliders,
+                    sid, skeleton, subgraph, tiers2blacklist,
+                    unshielded_colliders, valid_cpdag, valid_dag, valid_ug,
+                    vstructs)
 from .nodes import (add_node, ancestors, arcs, children, compelled_arcs,
                     degree, descendants, directed_arcs, drop_arc, drop_edge,
                     in_degree, incident_arcs, incoming_arcs, isolated_nodes,
@@ -33,7 +37,9 @@ from .nodes import (add_node, ancestors, arcs, children, compelled_arcs,
                     undirected_arcs)
 from .strength import (arc_strength, averaged_network,
                        custom_strength, inclusion_threshold)
-from .structure import BayesianNetwork, hc, score, tabu
+from .preprocessing import configs, discretize
+from .structure import (BF, BayesianNetwork, alpha_star, blacklist,
+                        hc, ntests, score, tabu, whitelist)
 
 __all__ = [
     # types
@@ -49,9 +55,12 @@ __all__ = [
     # classifiers
     "classify", "naive_bayes", "tree_bayes",
     # testing and scoring
-    "ci_test", "score",
+    "ci_test", "score", "alpha_star", "BF",
+    "whitelist", "blacklist", "ntests",
+    # preprocessing
+    "discretize", "configs",
     # parameter learning and prediction
-    "fit", "custom_fit", "bn_net", "predict",
+    "fit", "custom_fit", "bn_net", "predict", "identifiable", "singular",
     # simulation and inference
     "cpdist", "cpquery", "query", "rbn", "set_seed",
     "gbn2mvnorm", "mvnorm2gbn",
@@ -67,6 +76,8 @@ __all__ = [
     # graph properties
     "acyclic", "connected_components", "directed", "node_ordering",
     "path_exists", "valid_cpdag", "valid_dag", "valid_ug",
+    "dsep", "colliders", "unshielded_colliders", "shielded_colliders",
+    "vstructs", "cextend", "sid", "complete_graph", "random_graph",
     "ordering2blacklist", "set2blacklist", "tiers2blacklist",
     # nodes and arcs
     "arcs", "narcs", "nnodes", "parents", "children", "mb", "nbr", "spouses",
