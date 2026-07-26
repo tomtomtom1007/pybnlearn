@@ -9,7 +9,7 @@ from ._core import BNLearnError, ci_test
 from .bootstrap import CrossValidation, bn_cv, boot_strength
 from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
-from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit
+from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit, predict
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
 from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
@@ -26,7 +26,7 @@ __all__ = [
     # testing and scoring
     "ci_test", "score",
     # parameter learning
-    "fit",
+    "fit", "predict",
     # simulation and inference
     "cpdist", "cpquery", "rbn", "set_seed",
     # graphs

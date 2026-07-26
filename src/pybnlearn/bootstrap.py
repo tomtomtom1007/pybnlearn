@@ -18,7 +18,7 @@ from ._core import (arc_strength_coefficients, arc_strength_counters,
                     consistent_extension, cpdag_arcs, network_loglikelihood,
                     sample_indices)
 from . import constraint, graph, hybrid, structure
-from .fit import fit
+from .fit import DiscreteNode, fit, predict
 from .structure import BayesianNetwork, _check_complete
 
 __all__ = ["CrossValidation", "bn_cv", "boot_strength"]
@@ -180,8 +180,99 @@ def _as_dag(net):
                            consistent_extension(moralised, net.nodes))
 
 
+_PREDICTIVE_LOSSES = ("pred", "cor", "mse", "f1", "auroc")
+
+
+def _classification_error(observed, predicted):
+    """clerr.loss(): the proportion misclassified, over the observations both
+    are defined for."""
+    complete = ~(pd.isna(observed) | pd.isna(predicted))
+    if not complete.any():
+        return float("nan")
+    return float((observed[complete] != predicted[complete]).mean())
+
+
+def _f1(observed, predicted, levels):
+    """f1.loss(): the F1 of the first level for a binary target, the mean of
+    the per-level F1s otherwise."""
+    observed = pd.Categorical(observed, categories=levels)
+    predicted = pd.Categorical(predicted, categories=levels)
+    matrix = pd.crosstab(observed, predicted, dropna=False).reindex(
+        index=levels, columns=levels, fill_value=0).to_numpy(dtype=float)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        precision = np.diag(matrix) / matrix.sum(axis=0)
+        recall = np.diag(matrix) / matrix.sum(axis=1)
+        f1 = 2 * precision * recall / (precision + recall)
+
+    f1 = np.nan_to_num(f1, nan=0.0)
+    return float(f1[0] if len(levels) == 2 else f1.mean())
+
+
+def _auc(labels, scores, levels):
+    """One binary AUC, by the trapezoid rule over the ROC points R walks."""
+    complete = ~(pd.isna(labels) | pd.isna(scores))
+    labels = np.asarray(labels)[complete]
+    scores = np.asarray(scores, dtype=float)[complete]
+
+    negative, positive = levels[0], levels[1]
+    cutoffs = np.append(np.unique(scores)[::-1], 0.0)
+
+    npos = int((labels == positive).sum())
+    nneg = int((labels == negative).sum())
+    if npos == 0 or nneg == 0:
+        return float("nan")
+
+    predicted_positive = scores[None, :] > cutoffs[:, None]
+    fp = (predicted_positive & (labels == negative)[None, :]).sum(axis=1)
+    tp = (predicted_positive & (labels == positive)[None, :]).sum(axis=1)
+
+    fpr, tpr = fp / nneg, tp / npos
+    if len(fpr) < 2:
+        return float("nan")
+
+    return float(np.sum(0.5 * np.diff(fpr) * (tpr[1:] + tpr[:-1])))
+
+
+def _predictive_loss(loss, observed, predicted, probabilities, levels):
+    if loss == "pred":
+        return _classification_error(observed, predicted)
+
+    if loss == "f1":
+        return _f1(observed, predicted, levels)
+
+    if loss == "auroc":
+        if probabilities is None or len(levels) != 2:
+            raise NotImplementedError(
+                "the auroc loss is only implemented for binary targets")
+        return _auc(observed, probabilities[levels[1]], levels)
+
+    numeric_observed = np.asarray(observed, dtype=float)
+    numeric_predicted = np.asarray(predicted, dtype=float)
+    complete = np.isfinite(numeric_observed) & np.isfinite(numeric_predicted)
+
+    if loss == "mse":
+        return float(np.mean((numeric_observed[complete]
+                              - numeric_predicted[complete]) ** 2))
+
+    # "cor": R's cor() returns NA when either variable is constant, which
+    # happens whenever the target has no parents and so is predicted by a
+    # single number.  Constancy is tested exactly rather than by comparing a
+    # computed standard deviation against zero: summing 500 copies of the same
+    # double and dividing gives a mean that is several ULP off, so the
+    # "variance" comes out around 1e-29 rather than 0, and the guard would
+    # never fire.  (bnlearn's own cgsd() has this problem -- it returns 6e-15
+    # for a constant vector -- but R's cor() does its own, accurate check.)
+    if (np.ptp(numeric_observed[complete]) == 0
+            or np.ptp(numeric_predicted[complete]) == 0):
+        return float("nan")
+    return float(np.corrcoef(numeric_observed[complete],
+                             numeric_predicted[complete])[0, 1])
+
+
 def bn_cv(data, bn, loss=None, k=10, m=None, method="k-fold", folds=None,
-          algorithm_args=None, fit_method=None, fit_args=None):
+          algorithm_args=None, fit_method=None, fit_args=None,
+          target=None, predict_method="parents", predict_args=None):
     """Cross-validate a network or a learning algorithm, as bnlearn's bn.cv().
 
     Parameters
@@ -212,10 +303,12 @@ def bn_cv(data, bn, loss=None, k=10, m=None, method="k-fold", folds=None,
     _check_complete(data)
 
     loss = loss or "logl"
-    if loss != "logl":
-        raise NotImplementedError(
-            f"loss {loss!r} needs predict(), which is not ported yet; only "
-            "'logl' is available")
+    if loss not in ("logl",) + _PREDICTIVE_LOSSES:
+        raise ValueError(
+            f"unknown loss {loss!r}; available are logl, "
+            + ", ".join(_PREDICTIVE_LOSSES))
+    if loss in _PREDICTIVE_LOSSES and target is None:
+        raise ValueError(f"the {loss!r} loss needs a target node")
 
     n = len(data)
     k = int(k)
@@ -243,17 +336,60 @@ def bn_cv(data, bn, loss=None, k=10, m=None, method="k-fold", folds=None,
         net = _as_dag(net)
         fitted = fit(net, train, method=fit_method, **(fit_args or {}))
 
-        value = network_loglikelihood(fitted, held_out)
-        results.append({
-            "test": test,
-            "network": net,
-            "fitted": fitted,
-            "loss": -value["loglik"] / value["nobs"],
-            "effective.size": value["nobs"],
-        })
+        record = {"test": test, "network": net, "fitted": fitted}
 
-    weights = np.array([r["effective.size"] for r in results])
-    values = np.array([r["loss"] for r in results])
-    mean = float(np.average(values, weights=weights))
+        if loss == "logl":
+            value = network_loglikelihood(fitted, held_out)
+            record["loss"] = -value["loglik"] / value["nobs"]
+            record["effective.size"] = value["nobs"]
+        else:
+            wants_probabilities = (loss == "auroc"
+                                   and isinstance(fitted[target],
+                                                  DiscreteNode))
+            out = predict(fitted, target, held_out, method=predict_method,
+                          prob=wants_probabilities, **(predict_args or {}))
+            predicted, probabilities = (out if wants_probabilities
+                                        else (out, None))
+
+            record.update({
+                "observed": held_out[target],
+                "predicted": predicted,
+                "probabilities": probabilities,
+                # the loss is computed over the pooled folds, not per fold,
+                # so it is filled in afterwards.
+                "loss": None,
+                "effective.size": len(held_out),
+            })
+
+        results.append(record)
+
+    levels = (list(fitted[target].levels[0])
+              if loss in ("pred", "f1", "auroc") else None)
+
+    if loss == "logl":
+        weights = np.array([r["effective.size"] for r in results])
+        values = np.array([r["loss"] for r in results])
+        mean = float(np.average(values, weights=weights))
+    elif method == "hold-out":
+        # hold-out scores each repetition on its own and averages the scores.
+        for record in results:
+            record["loss"] = _predictive_loss(
+                loss, record["observed"], record["predicted"],
+                record["probabilities"], levels)
+        mean = float(np.mean([r["loss"] for r in results]))
+    else:
+        # k-fold pools every fold's predictions and scores them once, which is
+        # not the same as averaging per-fold scores when the folds differ in
+        # size or class balance.
+        observed = pd.concat([pd.Series(r["observed"]).reset_index(drop=True)
+                              for r in results], ignore_index=True)
+        predicted = pd.concat([pd.Series(r["predicted"]).reset_index(drop=True)
+                               for r in results], ignore_index=True)
+        probabilities = (
+            pd.concat([r["probabilities"].reset_index(drop=True)
+                       for r in results], ignore_index=True)
+            if results[0]["probabilities"] is not None else None)
+        mean = _predictive_loss(loss, observed, predicted, probabilities,
+                                levels)
 
     return CrossValidation(results, loss, method, mean)

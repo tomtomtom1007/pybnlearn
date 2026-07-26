@@ -119,9 +119,9 @@ def test_cross_validation_covers_singular_folds():
     assert infinite, "no fixture exercises an infinite fold loss"
 
 
-def test_unsupported_losses_are_reported(datasets):
-    with pytest.raises(NotImplementedError, match="predict"):
-        pybnlearn.bn_cv(datasets["learning.test"], "hc", loss="pred", k=2)
+def test_unknown_losses_are_reported(datasets):
+    with pytest.raises(ValueError, match="unknown loss"):
+        pybnlearn.bn_cv(datasets["learning.test"], "hc", loss="nonesuch", k=2)
 
 
 def test_custom_folds(datasets):

@@ -1874,3 +1874,89 @@ def network_loglikelihood(fitted, data, keep=None, bint by_sample=False):
         }
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# prediction
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP predict_from_parents(SEXP fitted, SEXP node, SEXP data,
+    SEXP prob, SEXP debug)
+cdef extern SEXP predict_map_lw(SEXP node, SEXP fitted, SEXP data, SEXP n,
+    SEXP from_, SEXP prob, SEXP debug)
+
+
+cdef object _read_prediction(SEXP out, bint prob):
+    """The predicted values, plus the per-level probabilities when asked for.
+
+    The probability table comes back with the levels as its rows, so it is
+    transposed here into one row per observation, which is what a caller
+    wants to line up against the data.
+    """
+    cdef SEXP table, dim
+    cdef int nrow, ncol, i, j
+
+    values = _read_column(out)
+
+    if not prob:
+        return values, None
+
+    table = Rf_getAttrib(out, Rf_install(b"prob"))
+    if table == R_NilValue:
+        return values, None
+
+    dim = Rf_getAttrib(table, R_DimSymbol)
+    nrow = INTEGER(dim)[0]
+    ncol = INTEGER(dim)[1]
+
+    probabilities = np.empty((ncol, nrow), dtype=np.float64)
+    for j in range(ncol):
+        for i in range(nrow):
+            probabilities[j, i] = REAL(table)[j * nrow + i]
+
+    dimnames = Rf_getAttrib(table, Rf_install(b"dimnames"))
+    levels = (_strings(Rf_VECTOR_ELT(dimnames, 0))
+              if dimnames != R_NilValue else None)
+
+    return values, (probabilities, levels)
+
+
+def predict_parents(fitted, node, data, bint prob=False):
+    """predict(method = "parents"): the mode (or mean) of the node's
+    conditional distribution given its parents' observed values."""
+    cdef SEXP a[5]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _fitted_sexp(fitted)
+        a[1] = _str_vector([str(node)])
+        a[2] = _dataframe(data)
+        a[3] = Rf_ScalarLogical(1 if prob else 0)
+        a[4] = Rf_ScalarLogical(0)
+        return _read_prediction(
+            _guarded(<void *>predict_from_parents, a, 5), prob)
+    finally:
+        pybn_arena_pop()
+
+
+def predict_bayes_lw(fitted, node, data, predictors, int n=500,
+                     bint prob=False):
+    """predict(method = "bayes-lw"): the maximum a posteriori value, estimated
+    by likelihood weighting over the other observed variables."""
+    cdef SEXP a[7]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _str_vector([str(node)])
+        a[1] = _fitted_sexp(fitted)
+        a[2] = _dataframe(data)
+        a[3] = Rf_ScalarInteger(n)
+        a[4] = _str_vector([str(v) for v in predictors])
+        a[5] = Rf_ScalarLogical(1 if prob else 0)
+        a[6] = Rf_ScalarLogical(0)
+        return _read_prediction(
+            _guarded(<void *>predict_map_lw, a, 7), prob)
+    finally:
+        pybn_arena_pop()

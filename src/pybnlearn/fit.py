@@ -13,10 +13,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ._core import discrete_parameters, gaussian_parameters
+from ._core import (discrete_parameters, gaussian_parameters,
+                    predict_bayes_lw, predict_parents)
 from .structure import _check_complete, _data_type
 
-__all__ = ["DiscreteNode", "FittedNetwork", "GaussianNode", "fit"]
+__all__ = ["DiscreteNode", "FittedNetwork", "GaussianNode", "fit",
+           "predict"]
 
 
 class DiscreteNode:
@@ -195,3 +197,75 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
                                         result)
 
     return FittedNetwork(fitted, method)
+
+
+def predict(fitted, node, data, method="parents", predictors=None, n=500,
+            prob=False):
+    """Predict one variable from the others, as bnlearn's predict() does.
+
+    Parameters
+    ----------
+    fitted : FittedNetwork
+    node : str
+        The variable to predict.
+    data : pandas.DataFrame
+        The observed values.  The predicted node may be present; it is ignored.
+    method : {"parents", "bayes-lw"}
+        "parents" conditions only on the node's parents and is exact given
+        them.  "bayes-lw" conditions on every other observed variable, by
+        likelihood weighting, so it is a Monte Carlo estimate -- seed with
+        `set_seed()` to make it reproducible.
+    predictors : sequence of str, optional
+        For "bayes-lw", which variables to condition on; defaults to every
+        other variable present in both the data and the network.
+    n : int
+        Particles per observation for "bayes-lw".
+    prob : bool
+        Also return the probability of each level.  Discrete nodes only.
+
+    Returns
+    -------
+    The predicted values, or `(values, probabilities)` when `prob` is set,
+    where `probabilities` is a DataFrame with one column per level.
+    """
+    if not isinstance(fitted, FittedNetwork):
+        raise TypeError("predict() needs a fitted network; call fit() first")
+    if node not in fitted:
+        raise ValueError(f"unknown node {node!r}")
+    if method not in ("parents", "bayes-lw"):
+        if method == "exact":
+            raise NotImplementedError(
+                "exact prediction goes through the gRain package in bnlearn "
+                "and is not ported; use method='bayes-lw' for an approximation")
+        raise ValueError("method must be 'parents' or 'bayes-lw'")
+
+    if prob and not isinstance(fitted[node], DiscreteNode):
+        raise ValueError(
+            "prediction probabilities are only available for discrete nodes")
+
+    if method == "parents":
+        needed = list(fitted[node].parents)
+        missing = [p for p in needed if p not in data.columns]
+        if missing:
+            raise ValueError(
+                f"predicting {node!r} from its parents needs "
+                + ", ".join(missing) + ", which the data do not have")
+        values, probabilities = predict_parents(fitted, node, data, prob=prob)
+    else:
+        if predictors is None:
+            predictors = [str(c) for c in data.columns
+                          if str(c) != node and str(c) in fitted.nodes]
+        else:
+            predictors = [str(p) for p in predictors]
+            if node in predictors:
+                raise ValueError(
+                    f"{node!r} is both a predictor and the node being "
+                    "predicted")
+        values, probabilities = predict_bayes_lw(
+            fitted, node, data, predictors, n=int(n), prob=prob)
+
+    if not prob:
+        return values
+
+    table, levels = probabilities
+    return values, pd.DataFrame(table, columns=levels, index=data.index)
