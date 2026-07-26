@@ -10,6 +10,7 @@ from .bootstrap import CrossValidation, bn_cv, boot_strength
 from .classifiers import classify, naive_bayes, tree_bayes
 from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
+from .exact import Factor, query
 from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit, predict
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
@@ -21,7 +22,7 @@ from .structure import BayesianNetwork, hc, score, tabu
 __all__ = [
     # types
     "BNLearnError", "BayesianNetwork", "CrossValidation", "DiscreteNode",
-    "FittedNetwork", "GaussianNode",
+    "Factor", "FittedNetwork", "GaussianNode",
     # structure learning: score-based, constraint-based, hybrid, pairwise
     "hc", "tabu",
     "gs", "iamb", "iamb_fdr", "inter_iamb", "mmpc", "pc_stable",
@@ -35,7 +36,7 @@ __all__ = [
     # parameter learning and prediction
     "fit", "predict",
     # simulation and inference
-    "cpdist", "cpquery", "rbn", "set_seed",
+    "cpdist", "cpquery", "query", "rbn", "set_seed",
     # resampling
     "bn_cv", "boot_strength",
     # graphs and comparison

@@ -125,10 +125,23 @@ def test_a_target_is_required(datasets):
         pybnlearn.bn_cv(datasets["learning.test"], "hc", loss="pred", k=2)
 
 
-def test_exact_prediction_is_reported_as_missing(networks, datasets):
-    with pytest.raises(NotImplementedError, match="gRain"):
+def test_unknown_prediction_methods_are_reported(networks, datasets):
+    with pytest.raises(ValueError, match="method must be"):
         pybnlearn.predict(networks["learning.test"], "B",
-                          datasets["learning.test"].head(10), method="exact")
+                          datasets["learning.test"].head(10),
+                          method="nonesuch")
+
+
+def test_exact_prediction_uses_the_posterior_it_reports(networks, datasets):
+    """The predicted class must be the argmax of the probabilities returned
+    alongside it, or one of the two is wrong."""
+    data = datasets["learning.test"].head(50)
+    predicted, probabilities = pybnlearn.predict(
+        networks["learning.test"], "B", data, method="exact", prob=True)
+
+    for i, value in enumerate(np.asarray(predicted).astype(str)):
+        row = probabilities.iloc[i]
+        assert row[value] == pytest.approx(row.max())
 
 
 def test_probabilities_are_discrete_only(networks, datasets):

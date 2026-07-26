@@ -235,16 +235,17 @@ def predict(fitted, node, data, method="parents", predictors=None, n=500,
         raise TypeError("predict() needs a fitted network; call fit() first")
     if node not in fitted:
         raise ValueError(f"unknown node {node!r}")
-    if method not in ("parents", "bayes-lw"):
-        if method == "exact":
-            raise NotImplementedError(
-                "exact prediction goes through the gRain package in bnlearn "
-                "and is not ported; use method='bayes-lw' for an approximation")
-        raise ValueError("method must be 'parents' or 'bayes-lw'")
+    if method not in ("parents", "bayes-lw", "exact"):
+        raise ValueError("method must be 'parents', 'bayes-lw' or 'exact'")
 
     if prob and not isinstance(fitted[node], DiscreteNode):
         raise ValueError(
             "prediction probabilities are only available for discrete nodes")
+
+    if method == "exact":
+        from .exact import exact_predict
+        return exact_predict(fitted, node, data, predictors=predictors,
+                             prob=prob)
 
     if method == "parents":
         needed = list(fitted[node].parents)

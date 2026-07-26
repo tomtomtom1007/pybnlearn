@@ -18,6 +18,12 @@ R C API bnlearn uses — the SEXP object model, attributes, `allocVector`,
 vendored sources keep including `<R.h>` and friends by their usual names, so
 tracking a new bnlearn release means dropping in a new tarball.
 
+One thing here is *not* a port: bnlearn has no exact inference of its own, so
+`query()` implements the junction tree directly rather than delegating to the
+gRain package as bnlearn does. Its tests compare numbers against gRain, which
+is a weaker claim than the rest of the suite makes, and `src/pybnlearn/exact.py`
+says why.
+
 R's own standalone maths library is vendored too (`src/c/nmath/`), along with
 R's Mersenne-Twister, so distribution functions and random streams agree with R
 bit for bit. That is what makes it meaningful to assert that results *match*
@@ -64,10 +70,13 @@ fitted = pybnlearn.fit(net, data)
 fitted["B"].probabilities        # the conditional probability table
 fitted["B"].as_frame()           # ... in long format
 
-# inference: seeded runs reproduce R's set.seed() exactly
+# inference: seeded sampling reproduces R's set.seed() exactly
 pybnlearn.set_seed(1)
 pybnlearn.cpquery(fitted, {"B": "a"}, {"A": "a"}, method="ls", n=10000)
 pybnlearn.rbn(fitted, 100)       # sample from the network
+
+# ... or compute it exactly, no sampling involved
+pybnlearn.query(fitted, "B", {"A": "a"}).values
 
 # resampling
 pybnlearn.set_seed(1)
@@ -110,7 +119,8 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams` |
 | Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones |
-| Prediction | `predict` — from a node's parents, or by likelihood weighting over every other variable |
+| Prediction | `predict` — from a node's parents, by likelihood weighting, or exactly |
+| Exact inference | `query` — junction tree; conditional and joint distributions, computed rather than sampled |
 | Classifiers | `naive_bayes`, `tree_bayes`, `classify` — exact class posteriors |
 | Simulation and inference | `rbn`, `cpquery`, `cpdist` — logic sampling and likelihood weighting; `set_seed` reproduces R's `set.seed` |
 | Resampling | `boot_strength`, `bn_cv` — bootstrap arc strengths, k-fold / hold-out / custom-fold cross-validation, all six losses |
@@ -119,13 +129,13 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 Not yet ported: the remaining constraint-based and hybrid algorithms
 (`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), conditional Gaussian
 parameter learning, exact inference
-exact prediction and inference for general networks (bnlearn routes both
-through the gRain package), conditional Gaussian networks, incomplete data,
-non-uniform graph priors, and random restarts for `hc`.
+conditional Gaussian networks, incomplete data, non-uniform graph priors, and
+random restarts for `hc`.  Exact inference is available for discrete networks
+only.
 
 ## Verified against R
 
-`pytest` runs 1112 checks, 1052 of which compare directly against values produced
+`pytest` runs 1162 checks, 1092 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -158,6 +168,8 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 42 classifier structures and class posteriors, over four data sets and
   several class variables, including the tree root that decides how a TAN's
   feature tree is oriented;
+* 40 exact inference results checked against gRain -- marginals, conditionals
+  on up to three variables, joints, and exact prediction;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -178,6 +190,7 @@ Rscript tools/gen_r_inference_fixtures.R
 Rscript tools/gen_r_resampling_fixtures.R
 Rscript tools/gen_r_predict_fixtures.R
 Rscript tools/gen_r_classifier_fixtures.R
+Rscript tools/gen_r_exact_fixtures.R      # also needs gRain
 ```
 
 ## Performance
