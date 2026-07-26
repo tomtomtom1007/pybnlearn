@@ -13,6 +13,8 @@ from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
 from .exact import Factor, query
 from .fit import (ConditionalGaussianNode, DiscreteNode, FittedNetwork,
                   GaussianNode, bn_net, custom_fit, fit, predict)
+from .foreign import (read_bif, read_dsc, read_net, write_bif,
+                      write_dot, write_dsc, write_net)
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
 from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
@@ -56,6 +58,9 @@ __all__ = [
     # resampling and arc strength
     "bn_cv", "boot_strength", "arc_strength", "custom_strength",
     "averaged_network", "inclusion_threshold",
+    # interchange formats
+    "read_bif", "read_dsc", "read_net", "write_bif", "write_dsc",
+    "write_net", "write_dot",
     # graphs and comparison
     "compare", "cpdag", "empty_graph", "hamming", "model2network", "moral",
     "nparams", "pdag2dag", "shd", "skeleton", "subgraph",

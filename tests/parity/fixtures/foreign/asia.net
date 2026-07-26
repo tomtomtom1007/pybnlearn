@@ -1,0 +1,67 @@
+net 
+{ 
+}
+node A 
+{
+  states = ( "no" "yes" );
+}
+node B 
+{
+  states = ( "no" "yes" );
+}
+node D 
+{
+  states = ( "no" "yes" );
+}
+node E 
+{
+  states = ( "no" "yes" );
+}
+node L 
+{
+  states = ( "no" "yes" );
+}
+node S 
+{
+  states = ( "no" "yes" );
+}
+node T 
+{
+  states = ( "no" "yes" );
+}
+node X 
+{
+  states = ( "no" "yes" );
+}
+potential ( A ) 
+{
+  data = ( 0.9916 0.0084 );
+}
+potential ( B | S ) 
+{
+  data = ((0.7006036 0.2993964)(0.2823062 0.7176938)) ;
+}
+potential ( D | B E ) 
+{
+  data = (((0.90017286 0.09982714)(0.2773723 0.7226277))((0.2137306 0.7862694)(0.1459227 0.8540773))) ;
+}
+potential ( E | L T ) 
+{
+  data = (((1.0 0.0)(0.0 1.0))((0.0 1.0)(0.0 1.0))) ;
+}
+potential ( L | S ) 
+{
+  data = ((0.98631791 0.01368209)(0.8823062 0.1176938)) ;
+}
+potential ( S ) 
+{
+  data = ( 0.497 0.503 );
+}
+potential ( T | A ) 
+{
+  data = ((0.991528842 0.008471158)(0.95238095 0.04761905)) ;
+}
+potential ( X | E ) 
+{
+  data = ((0.95658747 0.04341253)(0.005405405 0.994594595)) ;
+}

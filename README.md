@@ -120,23 +120,34 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Structure learning (pairwise) | `chow_liu`, `aracne` |
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams` |
-| Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones, `mle-cg` for mixtures of the two |
+| Graph properties | `acyclic`, `directed`, `valid_dag`, `valid_cpdag`, `valid_ug`, `path_exists`, `connected_components`, `node_ordering` |
+| Nodes and arcs | `parents`, `children`, `mb`, `nbr`, `spouses`, `ancestors`, `descendants`, `root_nodes`, `leaf_nodes`, `isolated_nodes`, `degree`, `in_degree`, `out_degree`, `arcs`, `narcs`, `nnodes`, `directed_arcs`, `undirected_arcs`, `incoming_arcs`, `outgoing_arcs`, `incident_arcs`, `compelled_arcs`, `reversible_arcs` |
+| Editing a graph | `set_arc`, `drop_arc`, `reverse_arc`, `set_edge`, `drop_edge`, `add_node`, `remove_node`, `rename_nodes` |
+| Constraints from orderings | `ordering2blacklist`, `tiers2blacklist`, `set2blacklist` |
+| Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones, `mle-cg` for mixtures of the two; `custom_fit` to supply parameters by hand; `bn_net` to drop them again |
 | Prediction | `predict` — from a node's parents, by likelihood weighting, or exactly |
 | Exact inference | `query` — junction tree for discrete networks, multivariate normal for Gaussian ones; conditional and joint distributions, computed rather than sampled |
 | Gaussian networks as distributions | `gbn2mvnorm`, `mvnorm2gbn` — the global mean and covariance, and the factorisation back |
 | Classifiers | `naive_bayes`, `tree_bayes`, `classify` — exact class posteriors |
 | Simulation and inference | `rbn`, `cpquery`, `cpdist` — logic sampling and likelihood weighting; `set_seed` reproduces R's `set.seed` |
 | Resampling | `boot_strength`, `bn_cv` — bootstrap arc strengths, k-fold / hold-out / custom-fold cross-validation, all six losses |
+| Arc strength | `arc_strength` (p-value or score difference), `custom_strength`, `averaged_network`, `inclusion_threshold` |
+| Interchange formats | `read_bif`, `read_dsc`, `read_net`, `write_bif`, `write_dsc`, `write_net`, `write_dot` |
 | Utilities | `score`, `modelstring` |
 
 Not yet ported: the remaining constraint-based and hybrid algorithms
-(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), incomplete data,
-non-uniform graph priors, and random restarts for `hc`.  Exact inference
-covers discrete and Gaussian networks, but not mixtures of the two.
+(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), `direct.lingam`,
+incomplete data (`impute`, `structural.em`), the causal-inference layer
+(`as.scm`, `intervention`, `counterfactual`), `dsep` and the v-structure
+utilities, `discretize`, `random.graph`, non-uniform graph priors, and
+random restarts for `hc`.  Exact inference covers discrete and Gaussian
+networks, but not mixtures of the two.  Plotting and the conversions to
+igraph and graphNEL are deliberately out of scope: they would be rewrites
+rather than ports, with nothing to check against.
 
 ## Verified against R
 
-`pytest` runs 1327 checks, 1244 of which compare directly against values produced
+`pytest` runs 2330 checks, 2190 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -182,6 +193,22 @@ by R 4.6.1 with bnlearn 5.2.1:
   learning with all four `-cg` scores under both `hc` and `tabu`, and
   parameter learning across all three of the estimators `mle-cg` dispatches
   to;
+* 138 arc-strength and network-averaging results: p-values and score
+  differences for six data sets and thirteen criteria, bootstrap strengths
+  with the inclusion threshold they carry, and the averaged network at four
+  thresholds -- plus thirteen strength vectors of awkward shapes checking
+  that R's optimiser is reproduced rather than approximated, since the
+  threshold it finds is used as a cutoff;
+* 632 checks of the node and arc utilities, enumerated rather than chosen:
+  nine graphs -- including one whose undirected part is not chordal and one
+  with a real directed cycle -- crossed with every ordered pair of nodes and
+  all five arc operations;
+* 148 interchange-format results: every node of four networks written by R
+  as BIF, DSC and NET and read back here, which is what pins down where each
+  conditional distribution belongs -- NET does not record it at all;
+* 24 hand-built networks from `custom_fit`, compared as parameters and then
+  sampled from and queried, since a network with an axis in the wrong place
+  reads back correctly and samples from a different distribution;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -205,6 +232,10 @@ Rscript tools/gen_r_classifier_fixtures.R
 Rscript tools/gen_r_exact_fixtures.R      # also needs gRain
 Rscript tools/gen_r_cg_fixtures.R
 Rscript tools/gen_r_mvnorm_fixtures.R
+Rscript tools/gen_r_strength_fixtures.R
+Rscript tools/gen_r_nodes_fixtures.R      # also needs igraph
+Rscript tools/gen_r_custom_fixtures.R
+Rscript tools/gen_r_foreign_fixtures.R
 ```
 
 ## Performance

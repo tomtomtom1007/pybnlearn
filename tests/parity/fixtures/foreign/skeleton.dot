@@ -1,0 +1,13 @@
+graph {
+  "A" ;
+  "B" ;
+  "C" ;
+  "D" ;
+  "E" ;
+  "F" ;
+  edge [dir=none] "A" -- "B" ;
+  edge [dir=none] "A" -- "D" ;
+  edge [dir=none] "B" -- "E" ;
+  edge [dir=none] "C" -- "D" ;
+  edge [dir=none] "E" -- "F" ;
+}

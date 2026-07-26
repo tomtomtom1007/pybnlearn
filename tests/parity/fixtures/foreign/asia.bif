@@ -1,0 +1,60 @@
+network unknown {
+}
+variable A {
+  type discrete [ 2 ] { no, yes };
+}
+variable B {
+  type discrete [ 2 ] { no, yes };
+}
+variable D {
+  type discrete [ 2 ] { no, yes };
+}
+variable E {
+  type discrete [ 2 ] { no, yes };
+}
+variable L {
+  type discrete [ 2 ] { no, yes };
+}
+variable S {
+  type discrete [ 2 ] { no, yes };
+}
+variable T {
+  type discrete [ 2 ] { no, yes };
+}
+variable X {
+  type discrete [ 2 ] { no, yes };
+}
+probability ( A ) {
+  table 0.9916, 0.0084;
+}
+probability ( B | S ) {
+  (no) 0.7006036, 0.2993964;
+  (yes) 0.2823062, 0.7176938;
+}
+probability ( D | B, E ) {
+  (no, no) 0.90017286, 0.09982714;
+  (yes, no) 0.2137306, 0.7862694;
+  (no, yes) 0.2773723, 0.7226277;
+  (yes, yes) 0.1459227, 0.8540773;
+}
+probability ( E | L, T ) {
+  (no, no) 1.0, 0.0;
+  (yes, no) 0.0, 1.0;
+  (no, yes) 0.0, 1.0;
+  (yes, yes) 0.0, 1.0;
+}
+probability ( L | S ) {
+  (no) 0.98631791, 0.01368209;
+  (yes) 0.8823062, 0.1176938;
+}
+probability ( S ) {
+  table 0.497, 0.503;
+}
+probability ( T | A ) {
+  (no) 0.991528842, 0.008471158;
+  (yes) 0.95238095, 0.04761905;
+}
+probability ( X | E ) {
+  (no) 0.95658747, 0.04341253;
+  (yes) 0.005405405, 0.994594595;
+}

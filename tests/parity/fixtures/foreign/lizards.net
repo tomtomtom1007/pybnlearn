@@ -1,0 +1,27 @@
+net 
+{ 
+}
+node Diameter 
+{
+  states = ( "narrow" "wide" );
+}
+node Height 
+{
+  states = ( "high" "low" );
+}
+node Species 
+{
+  states = ( "Sagrei" "Distichus" );
+}
+potential ( Diameter | Species ) 
+{
+  data = ((0.7195122 0.2804878)(0.5469388 0.4530612)) ;
+}
+potential ( Height | Species ) 
+{
+  data = ((0.7378049 0.2621951)(0.5836735 0.4163265)) ;
+}
+potential ( Species ) 
+{
+  data = ( 0.400978 0.599022 );
+}

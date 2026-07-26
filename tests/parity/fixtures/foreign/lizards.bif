@@ -1,0 +1,22 @@
+network unknown {
+}
+variable Diameter {
+  type discrete [ 2 ] { narrow, wide };
+}
+variable Height {
+  type discrete [ 2 ] { high, low };
+}
+variable Species {
+  type discrete [ 2 ] { Sagrei, Distichus };
+}
+probability ( Diameter | Species ) {
+  (Sagrei) 0.7195122, 0.2804878;
+  (Distichus) 0.5469388, 0.4530612;
+}
+probability ( Height | Species ) {
+  (Sagrei) 0.7378049, 0.2621951;
+  (Distichus) 0.5836735, 0.4163265;
+}
+probability ( Species ) {
+  table 0.400978, 0.599022;
+}
