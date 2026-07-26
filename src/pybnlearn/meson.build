@@ -18,7 +18,7 @@ py.extension_module(
 )
 
 py.install_sources(
-  ['__init__.py', 'bootstrap.py', 'constraint.py', 'fit.py', 'graph.py', 'hybrid.py',
+  ['__init__.py', 'bootstrap.py', 'classifiers.py', 'constraint.py', 'fit.py', 'graph.py', 'hybrid.py',
    'inference.py', 'structure.py'],
   subdir: 'pybnlearn',
 )

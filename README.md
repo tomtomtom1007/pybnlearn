@@ -111,6 +111,7 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Comparison | `shd`, `hamming`, `compare`, `nparams` |
 | Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones |
 | Prediction | `predict` — from a node's parents, or by likelihood weighting over every other variable |
+| Classifiers | `naive_bayes`, `tree_bayes`, `classify` — exact class posteriors |
 | Simulation and inference | `rbn`, `cpquery`, `cpdist` — logic sampling and likelihood weighting; `set_seed` reproduces R's `set.seed` |
 | Resampling | `boot_strength`, `bn_cv` — bootstrap arc strengths, k-fold / hold-out / custom-fold cross-validation, all six losses |
 | Utilities | `score`, `modelstring` |
@@ -118,13 +119,13 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 Not yet ported: the remaining constraint-based and hybrid algorithms
 (`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), conditional Gaussian
 parameter learning, exact inference
-exact prediction and inference (bnlearn routes both through the gRain
-package), classifiers, conditional Gaussian networks, incomplete data,
+exact prediction and inference for general networks (bnlearn routes both
+through the gRain package), conditional Gaussian networks, incomplete data,
 non-uniform graph priors, and random restarts for `hc`.
 
 ## Verified against R
 
-`pytest` runs 1060 checks, 1010 of which compare directly against values produced
+`pytest` runs 1110 checks, 1052 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -154,6 +155,9 @@ by R 4.6.1 with bnlearn 5.2.1:
   drawing the same rows in the same order;
 * 48 predictions and prediction-based losses, covering both prediction
   methods and all five predictive cross-validation losses;
+* 42 classifier structures and class posteriors, over four data sets and
+  several class variables, including the tree root that decides how a TAN's
+  feature tree is oriented;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -173,6 +177,7 @@ Rscript tools/gen_r_levels.R
 Rscript tools/gen_r_inference_fixtures.R
 Rscript tools/gen_r_resampling_fixtures.R
 Rscript tools/gen_r_predict_fixtures.R
+Rscript tools/gen_r_classifier_fixtures.R
 ```
 
 ## Performance

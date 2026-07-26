@@ -1314,8 +1314,14 @@ def count_parameters(node_names, arcs, data, estimator="bic"):
         pybn_arena_pop()
 
 
-def chow_liu_arcs(data, node_names, estimator, whitelist=None, blacklist=None):
-    """chow.liu(): the maximum-weight spanning tree over mutual information."""
+def chow_liu_arcs(data, node_names, estimator, whitelist=None, blacklist=None,
+                  conditional=None):
+    """chow.liu(): the maximum-weight spanning tree over mutual information.
+
+    `conditional` is the class variable for a tree-augmented naive Bayes
+    classifier: the mutual information between features is then measured given
+    the class rather than marginally.
+    """
     cdef SEXP a[8]
     node_names = [str(v) for v in node_names]
 
@@ -1328,9 +1334,31 @@ def chow_liu_arcs(data, node_names, estimator, whitelist=None, blacklist=None):
         a[3] = _arcs_sexp(whitelist) if whitelist else R_NilValue
         a[4] = _arcs_sexp(blacklist) if blacklist else R_NilValue
         a[5] = _named_logical(node_names, True)
-        a[6] = R_NilValue
+        a[6] = (R_NilValue if conditional is None
+                else _factor_column(conditional.cat.codes.to_numpy(),
+                                    list(conditional.cat.categories)))
         a[7] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>chow_liu, a, 8))
+    finally:
+        pybn_arena_pop()
+
+
+cdef extern SEXP tree_directions(SEXP arcs, SEXP nodes, SEXP root, SEXP debug)
+
+
+def orient_tree(arcs, node_names, root):
+    """tree_directions(): orient an undirected tree away from a root."""
+    cdef SEXP a[4]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs)
+        a[1] = _str_vector(node_names)
+        a[2] = _str_vector([str(root)])
+        a[3] = Rf_ScalarLogical(0)
+        return _arcs_from_sexp(_guarded(<void *>tree_directions, a, 4))
     finally:
         pybn_arena_pop()
 
@@ -1958,5 +1986,33 @@ def predict_bayes_lw(fitted, node, data, predictors, int n=500,
         a[6] = Rf_ScalarLogical(0)
         return _read_prediction(
             _guarded(<void *>predict_map_lw, a, 7), prob)
+    finally:
+        pybn_arena_pop()
+
+
+cdef extern SEXP naivepred(SEXP fitted, SEXP data, SEXP training, SEXP prior,
+    SEXP prob, SEXP debug)
+
+
+def predict_classifier(fitted, training, data, prior, bint prob=False):
+    """naivepred(): exact prediction for a naive Bayes or TAN classifier.
+
+    The class is the only unobserved variable and every feature is a child of
+    it, so the posterior is a product over the features and no sampling is
+    needed -- this is exact where predict()'s "exact" method is not available.
+    """
+    cdef SEXP a[6]
+    cdef int index = list(fitted.nodes).index(str(training)) + 1
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _fitted_sexp(fitted)
+        a[1] = _dataframe(data)
+        a[2] = Rf_ScalarInteger(index)
+        a[3] = _numeric_column(np.asarray(prior, dtype=np.float64))
+        a[4] = Rf_ScalarLogical(1 if prob else 0)
+        a[5] = Rf_ScalarLogical(0)
+        return _read_prediction(_guarded(<void *>naivepred, a, 6), prob)
     finally:
         pybn_arena_pop()

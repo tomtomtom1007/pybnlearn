@@ -67,9 +67,12 @@ class GaussianNode:
 class FittedNetwork:
     """A network with parameters attached."""
 
-    def __init__(self, nodes, method):
+    def __init__(self, nodes, method, learning=None):
         self._nodes = dict(nodes)
         self.method = method
+        # carried over from the structure, so that a fitted classifier still
+        # knows which node is the class.
+        self.learning = dict(learning or {})
 
     @property
     def nodes(self):
@@ -196,7 +199,7 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
             fitted[node] = GaussianNode(node, parents[node], children[node],
                                         result)
 
-    return FittedNetwork(fitted, method)
+    return FittedNetwork(fitted, method, network.learning)
 
 
 def predict(fitted, node, data, method="parents", predictors=None, n=500,

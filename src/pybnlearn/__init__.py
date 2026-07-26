@@ -7,6 +7,7 @@ merely resembling them.  See NOTICE for attribution and licensing.
 
 from ._core import BNLearnError, ci_test
 from .bootstrap import CrossValidation, bn_cv, boot_strength
+from .classifiers import classify, naive_bayes, tree_bayes
 from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
 from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit, predict
@@ -26,7 +27,7 @@ __all__ = [
     # testing and scoring
     "ci_test", "score",
     # parameter learning
-    "fit", "predict",
+    "fit", "predict", "classify",
     # simulation and inference
     "cpdist", "cpquery", "rbn", "set_seed",
     # graphs
