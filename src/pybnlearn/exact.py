@@ -1,9 +1,16 @@
 """Exact inference by junction tree.
 
-This is the one part of pybnlearn that is not a port.  bnlearn does not
-implement exact inference itself: `cpquery(method = "exact")` and
-`predict(method = "exact")` hand the network to the gRain package, which is
-not vendored here.  So the algorithm below is written from scratch.
+For discrete networks this is the one part of pybnlearn that is not a port.
+bnlearn does not implement exact inference over discrete networks itself:
+`cpquery(method = "exact")` and `predict(method = "exact")` hand the network
+to the gRain package, which is not vendored here.  So the junction tree below
+is written from scratch.
+
+Gaussian networks are a different story, and are handled elsewhere: a
+Gaussian network is a multivariate normal in disguise, so conditioning is
+linear algebra rather than message passing, and bnlearn does implement that
+itself.  That code lives in mvnorm.py and is a port; what is here is the
+dispatch to it.
 
 That changes what "matching R" can mean.  Everywhere else, agreeing with R
 required reproducing its choices -- the order tests are run in, which arc a
@@ -32,7 +39,7 @@ import itertools
 import numpy as np
 import pandas as pd
 
-from .fit import DiscreteNode, FittedNetwork
+from .fit import DiscreteNode, FittedNetwork, GaussianNode
 
 __all__ = ["Factor", "query"]
 
@@ -442,8 +449,12 @@ class _JunctionTree:
         return joint.marginalise(variables)
 
 
+def _is_gaussian(fitted):
+    return all(isinstance(fitted[node], GaussianNode) for node in fitted.nodes)
+
+
 def query(fitted, nodes, evidence=None):
-    """Exact conditional probabilities, by junction tree.
+    """The exact conditional distribution of some nodes given others.
 
     Unlike `cpquery`, this is not a Monte Carlo estimate: the answer is the
     network's, computed rather than sampled, so it does not depend on a seed
@@ -452,7 +463,7 @@ def query(fitted, nodes, evidence=None):
     Parameters
     ----------
     fitted : FittedNetwork
-        A fitted discrete network.
+        A fitted network, either all discrete or all Gaussian.
     nodes : str or sequence of str
         The variable, or variables, to compute the distribution of.
     evidence : dict, optional
@@ -460,17 +471,83 @@ def query(fitted, nodes, evidence=None):
 
     Returns
     -------
-    Factor
-        Use `.values` for the array, `.to_frame()` for a DataFrame.
+    Factor, for a discrete network -- use `.values` for the array and
+    `.to_frame()` for a DataFrame -- or MultivariateNormal for a Gaussian
+    one, which carries `.mean` and `.cov`.
     """
     if not isinstance(fitted, FittedNetwork):
         raise TypeError("query() needs a fitted network; call fit() first")
 
     if isinstance(nodes, str):
         nodes = [nodes]
+    nodes = [str(node) for node in nodes]
+
+    if _is_gaussian(fitted):
+        from .mvnorm import gbn2mvnorm
+
+        # conditioning removes the evidence variables from the distribution,
+        # so a node cannot be on both sides: its conditional distribution is
+        # a point mass, which is not a normal.
+        overlap = sorted(set(nodes) & set(evidence or {}))
+        if overlap:
+            raise ValueError(
+                "cannot query " + ", ".join(overlap)
+                + ": already given as evidence")
+
+        return gbn2mvnorm(fitted).condition(evidence).marginal(nodes)
 
     tree = _JunctionTree(fitted, evidence)
     return tree.marginal(nodes)
+
+
+def _gaussian_predict(fitted, node, data, predictors=None):
+    """exact.gaussian.prediction(): the conditional expectation of a node
+    given every other observed variable.
+
+    R takes a detour that looks longer than it is.  Rather than conditioning
+    the global distribution directly, it cuts the joint down to the node and
+    its predictors, factorises *that* back into a two-layer network in which
+    the node's parents are exactly the predictors, and then predicts from the
+    parents.  The answer is the same conditional expectation either way; the
+    detour is followed here so that the arithmetic is R's.
+    """
+    from ._core import predict_parents
+    from .mvnorm import gbn2mvnorm, mvnorm2gbn
+    from .graph import model2network
+
+    if predictors is None:
+        predictors = [str(c) for c in data.columns
+                      if str(c) != node and str(c) in fitted.nodes]
+    else:
+        predictors = [str(p) for p in predictors]
+        if node in predictors:
+            raise ValueError(
+                f"{node!r} is both a predictor and the node being predicted")
+
+    missing = [p for p in predictors if p not in data.columns]
+    if missing:
+        raise ValueError(
+            f"predicting {node!r} needs " + ", ".join(missing)
+            + ", which the data do not have")
+
+    wanted = [node] + predictors
+    reduced = gbn2mvnorm(fitted).marginal(wanted)
+
+    if np.isnan(reduced.mean).any() or np.isnan(reduced.cov).any():
+        # a singular model; R gives up rather than returning nonsense.
+        return np.full(len(data), np.nan)
+
+    if predictors:
+        modelstring = (f"[{node}|" + ":".join(predictors) + "]"
+                       + "".join(f"[{p}]" for p in predictors))
+    else:
+        modelstring = f"[{node}]"
+
+    distribution = mvnorm2gbn(model2network(modelstring), reduced.mean,
+                              reduced.cov, nodes=wanted)
+
+    values, _ = predict_parents(distribution, node, data, prob=False)
+    return values
 
 
 def exact_predict(fitted, node, data, predictors=None, prob=False):
@@ -486,6 +563,9 @@ def exact_predict(fitted, node, data, predictors=None, prob=False):
     node = str(node)
     if node not in fitted:
         raise ValueError(f"unknown node {node!r}")
+
+    if _is_gaussian(fitted):
+        return _gaussian_predict(fitted, node, data, predictors)
 
     if predictors is None:
         predictors = [str(c) for c in data.columns

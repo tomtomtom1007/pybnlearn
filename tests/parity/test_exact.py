@@ -195,8 +195,23 @@ def test_unknown_nodes_and_levels_are_reported(networks):
         pybnlearn.query(fitted, "D", {"S": "maybe"})
 
 
-def test_gaussian_networks_are_reported_as_unsupported(datasets):
+def test_gaussian_networks_go_the_other_way(datasets):
+    """query() dispatches on the network: a Gaussian one is a multivariate
+    normal, so it never reaches the junction tree.  Covered in detail by
+    test_mvnorm.py; asserted here so that the dispatch itself is tested from
+    the discrete side too."""
+    from pybnlearn.mvnorm import MultivariateNormal
+
     data = datasets["gaussian.test"]
+    fitted = pybnlearn.fit(pybnlearn.hc(data), data)
+
+    assert isinstance(pybnlearn.query(fitted, "A"), MultivariateNormal)
+
+
+def test_mixed_networks_are_reported_as_unsupported(datasets):
+    """Neither path handles a network that is part discrete and part
+    continuous, and saying so beats reaching one of them by accident."""
+    data = datasets["clgaussian.test"]
     fitted = pybnlearn.fit(pybnlearn.hc(data), data)
 
     with pytest.raises(NotImplementedError, match="discrete"):

@@ -300,14 +300,17 @@ def predict(fitted, node, data, method="parents", predictors=None, n=500,
         The variable to predict.
     data : pandas.DataFrame
         The observed values.  The predicted node may be present; it is ignored.
-    method : {"parents", "bayes-lw"}
+    method : {"parents", "bayes-lw", "exact"}
         "parents" conditions only on the node's parents and is exact given
         them.  "bayes-lw" conditions on every other observed variable, by
         likelihood weighting, so it is a Monte Carlo estimate -- seed with
-        `set_seed()` to make it reproducible.
+        `set_seed()` to make it reproducible.  "exact" also conditions on
+        every other observed variable but computes rather than samples, by
+        junction tree for a discrete network and by conditioning the global
+        multivariate normal for a Gaussian one.
     predictors : sequence of str, optional
-        For "bayes-lw", which variables to condition on; defaults to every
-        other variable present in both the data and the network.
+        For "bayes-lw" and "exact", which variables to condition on; defaults
+        to every other variable present in both the data and the network.
     n : int
         Particles per observation for "bayes-lw".
     prob : bool

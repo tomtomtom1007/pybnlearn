@@ -15,6 +15,7 @@ from .fit import (ConditionalGaussianNode, DiscreteNode, FittedNetwork,
                   GaussianNode, fit, predict)
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
+from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
 from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
                     model2network, moral, nparams, pdag2dag, shd, skeleton,
                     subgraph)
@@ -24,7 +25,7 @@ __all__ = [
     # types
     "BNLearnError", "BayesianNetwork", "ConditionalGaussianNode",
     "CrossValidation", "DiscreteNode",
-    "Factor", "FittedNetwork", "GaussianNode",
+    "Factor", "FittedNetwork", "GaussianNode", "MultivariateNormal",
     # structure learning: score-based, constraint-based, hybrid, pairwise
     "hc", "tabu",
     "gs", "iamb", "iamb_fdr", "inter_iamb", "mmpc", "pc_stable",
@@ -39,6 +40,7 @@ __all__ = [
     "fit", "predict",
     # simulation and inference
     "cpdist", "cpquery", "query", "rbn", "set_seed",
+    "gbn2mvnorm", "mvnorm2gbn",
     # resampling
     "bn_cv", "boot_strength",
     # graphs and comparison

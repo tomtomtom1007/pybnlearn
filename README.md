@@ -18,11 +18,13 @@ R C API bnlearn uses — the SEXP object model, attributes, `allocVector`,
 vendored sources keep including `<R.h>` and friends by their usual names, so
 tracking a new bnlearn release means dropping in a new tarball.
 
-One thing here is *not* a port: bnlearn has no exact inference of its own, so
-`query()` implements the junction tree directly rather than delegating to the
-gRain package as bnlearn does. Its tests compare numbers against gRain, which
-is a weaker claim than the rest of the suite makes, and `src/pybnlearn/exact.py`
-says why.
+One thing here is *not* a port: bnlearn has no exact inference over *discrete*
+networks of its own, so `query()` implements the junction tree directly rather
+than delegating to the gRain package as bnlearn does. Its tests compare numbers
+against gRain, which is a weaker claim than the rest of the suite makes, and
+`src/pybnlearn/exact.py` says why. Gaussian networks are a port: bnlearn turns
+those into a multivariate normal itself, and `src/pybnlearn/mvnorm.py` follows
+it.
 
 R's own standalone maths library is vendored too (`src/c/nmath/`), along with
 R's Mersenne-Twister, so distribution functions and random streams agree with R
@@ -111,31 +113,30 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | | |
 |---|---|
 | Conditional independence tests | `mi`, `mi-adf`, `mi-sh`, `x2`, `x2-adf` (discrete); `cor`, `zf`, `mi-g`, `mi-g-sh` (Gaussian) |
-| Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge` |
+| Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge`; `loglik-cg`, `aic-cg`, `bic-cg`, `ebic-cg` |
 | Structure learning (score-based) | `hc`, `tabu` — whitelists, blacklists, `maxp`, arbitrary starting networks |
 | Structure learning (constraint-based) | `pc_stable`, `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `mmpc`, `si_hiton_pc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
 | Structure learning (hybrid) | `mmhc`, `rsmax2` — any ported restrict/maximize pair |
 | Structure learning (pairwise) | `chow_liu`, `aracne` |
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams` |
-| Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones |
+| Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones, `mle-cg` for mixtures of the two |
 | Prediction | `predict` — from a node's parents, by likelihood weighting, or exactly |
-| Exact inference | `query` — junction tree; conditional and joint distributions, computed rather than sampled |
+| Exact inference | `query` — junction tree for discrete networks, multivariate normal for Gaussian ones; conditional and joint distributions, computed rather than sampled |
+| Gaussian networks as distributions | `gbn2mvnorm`, `mvnorm2gbn` — the global mean and covariance, and the factorisation back |
 | Classifiers | `naive_bayes`, `tree_bayes`, `classify` — exact class posteriors |
 | Simulation and inference | `rbn`, `cpquery`, `cpdist` — logic sampling and likelihood weighting; `set_seed` reproduces R's `set.seed` |
 | Resampling | `boot_strength`, `bn_cv` — bootstrap arc strengths, k-fold / hold-out / custom-fold cross-validation, all six losses |
 | Utilities | `score`, `modelstring` |
 
 Not yet ported: the remaining constraint-based and hybrid algorithms
-(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), conditional Gaussian
-parameter learning, exact inference
-conditional Gaussian networks, incomplete data, non-uniform graph priors, and
-random restarts for `hc`.  Exact inference is available for discrete networks
-only.
+(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), incomplete data,
+non-uniform graph priors, and random restarts for `hc`.  Exact inference
+covers discrete and Gaussian networks, but not mixtures of the two.
 
 ## Verified against R
 
-`pytest` runs 1162 checks, 1092 of which compare directly against values produced
+`pytest` runs 1327 checks, 1244 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -168,8 +169,19 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 42 classifier structures and class posteriors, over four data sets and
   several class variables, including the tree root that decides how a TAN's
   feature tree is oriented;
-* 40 exact inference results checked against gRain -- marginals, conditionals
-  on up to three variables, joints, and exact prediction;
+* 40 exact inference results for discrete networks checked against gRain --
+  marginals, conditionals on up to three variables, joints, and exact
+  prediction;
+* 82 Gaussian exact inference results, which unlike the discrete ones are
+  genuine parity fixtures: global means and covariances, the factorisation
+  back into a network, conditional expectations, and exact prediction of
+  every node of every structure -- including a network with a deterministic
+  node, whose covariance matrix is singular and which therefore exercises
+  the diagonal patching R does rather than failing;
+* 70 conditional Gaussian results over two mixed data sets: structure
+  learning with all four `-cg` scores under both `hc` and `tabu`, and
+  parameter learning across all three of the estimators `mle-cg` dispatches
+  to;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -191,6 +203,8 @@ Rscript tools/gen_r_resampling_fixtures.R
 Rscript tools/gen_r_predict_fixtures.R
 Rscript tools/gen_r_classifier_fixtures.R
 Rscript tools/gen_r_exact_fixtures.R      # also needs gRain
+Rscript tools/gen_r_cg_fixtures.R
+Rscript tools/gen_r_mvnorm_fixtures.R
 ```
 
 ## Performance
