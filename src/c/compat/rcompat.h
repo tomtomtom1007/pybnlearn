@@ -310,6 +310,11 @@ double unif_rand(void);
 double norm_rand(void);
 void   pybn_set_seed(unsigned int seed);
 
+/* R's sampling primitive: a uniform integer in [0, dn), drawn by rejection the
+ * way R has done since 3.6.0.  sample() is built on it, and so is the
+ * bootstrap's resampling. */
+double R_unif_index(double dn);
+
 /* sorting helpers from R_ext/Utils.h. */
 void R_qsort(double *v, size_t i, size_t j);
 void R_qsort_I(double *v, int *II, int i, int j);

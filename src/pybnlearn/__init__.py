@@ -6,6 +6,7 @@ merely resembling them.  See NOTICE for attribution and licensing.
 """
 
 from ._core import BNLearnError, ci_test
+from .bootstrap import CrossValidation, bn_cv, boot_strength
 from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
 from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit
@@ -18,7 +19,7 @@ from .structure import BayesianNetwork, hc, score, tabu
 
 __all__ = [
     "BNLearnError", "BayesianNetwork", "FittedNetwork",
-    "DiscreteNode", "GaussianNode",
+    "CrossValidation", "DiscreteNode", "GaussianNode",
     # structure learning
     "aracne", "chow_liu", "gs", "hc", "iamb", "iamb_fdr", "inter_iamb",
     "mmhc", "mmpc", "pc_stable", "rsmax2", "si_hiton_pc", "tabu",

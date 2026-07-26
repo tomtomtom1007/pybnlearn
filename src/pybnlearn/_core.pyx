@@ -1723,3 +1723,154 @@ def set_seed(unsigned int seed):
     """Seed the generator, reproducing R's set.seed() exactly."""
     _ensure_init()
     pybn_set_seed(seed)
+
+
+# ---------------------------------------------------------------------------
+# resampling
+# ---------------------------------------------------------------------------
+
+cdef extern from "rcompat.h":
+    double R_unif_index(double dn)
+
+cdef extern SEXP bootstrap_strength_counters(SEXP prob, SEXP weight,
+    SEXP arcs, SEXP nodes)
+cdef extern SEXP bootstrap_arc_coefficients(SEXP prob, SEXP nodes)
+
+
+def sample_indices(int n, int k, bint replace=False):
+    """R's sample(n, k, replace): one-based indices, drawing from the
+    generator exactly as R does.
+
+    The bootstrap depends on this: resample the same rows in the same order as
+    R, or every replicate learns from different data and nothing downstream
+    can agree.  Both branches are R's, including the `k < 2` special case that
+    takes the with-replacement path even when replace is FALSE.
+    """
+    cdef cnp.ndarray[cnp.int32_t, ndim=1] out = np.empty(k, dtype=np.int32)
+    cdef cnp.ndarray[cnp.int32_t, ndim=1] pool
+    cdef int i, j, left = n
+
+    _ensure_init()
+
+    if replace or k < 2:
+        for i in range(k):
+            out[i] = <int>(R_unif_index(n) + 1)
+        return out
+
+    if k > n:
+        raise ValueError("cannot take a sample larger than the population "
+                         "when replace is False")
+
+    pool = np.arange(n, dtype=np.int32)
+    for i in range(k):
+        j = <int>R_unif_index(left)
+        out[i] = pool[j] + 1
+        left -= 1
+        pool[j] = pool[left]
+
+    return out
+
+
+def arc_strength_counters(prob, arcs, node_names, double weight=1.0):
+    """bootstrap_strength_counters(): add one learned network's arcs to the
+    running counts.  Modifies `prob` in place on the R side, so the updated
+    matrix is read back and returned."""
+    cdef SEXP a[4]
+    cdef SEXP counters
+    cdef int n = len(node_names)
+    cdef int i, j
+
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        counters = Rf_allocVector(REALSXP, n * n)
+        flat = np.ascontiguousarray(np.asarray(prob, dtype=np.float64)
+                                    .ravel(order="F"))
+        for i in range(n * n):
+            REAL(counters)[i] = flat[i]
+        dim = Rf_allocVector(INTSXP, 2)
+        INTEGER(dim)[0] = n
+        INTEGER(dim)[1] = n
+        Rf_setAttrib(counters, R_DimSymbol, dim)
+
+        a[0] = counters
+        a[1] = Rf_ScalarReal(weight)
+        a[2] = _arcs_sexp(arcs)
+        a[3] = _str_vector(node_names)
+        _guarded(<void *>bootstrap_strength_counters, a, 4)
+
+        out = np.empty((n, n), dtype=np.float64)
+        for j in range(n):
+            for i in range(n):
+                out[i, j] = REAL(counters)[j * n + i]
+        return out
+    finally:
+        pybn_arena_pop()
+
+
+def arc_strength_coefficients(prob, node_names):
+    """bootstrap_arc_coefficients(): turn the counts into per-arc strength and
+    direction figures."""
+    cdef SEXP a[2]
+    cdef SEXP counters
+    cdef int n = len(node_names)
+    cdef int i
+
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        counters = Rf_allocVector(REALSXP, n * n)
+        flat = np.ascontiguousarray(np.asarray(prob, dtype=np.float64)
+                                    .ravel(order="F"))
+        for i in range(n * n):
+            REAL(counters)[i] = flat[i]
+        dim = Rf_allocVector(INTSXP, 2)
+        INTEGER(dim)[0] = n
+        INTEGER(dim)[1] = n
+        Rf_setAttrib(counters, R_DimSymbol, dim)
+
+        a[0] = counters
+        a[1] = _str_vector(node_names)
+        return _dataframe_to_py(
+            _guarded(<void *>bootstrap_arc_coefficients, a, 2))
+    finally:
+        pybn_arena_pop()
+
+
+cdef extern SEXP loglikelihood_function(SEXP fitted, SEXP data,
+    SEXP by_sample, SEXP keep_nodes, SEXP propagate_missing, SEXP debug)
+
+
+def network_loglikelihood(fitted, data, keep=None, bint by_sample=False):
+    """loglikelihood(): the log-likelihood of the data under a fitted network.
+
+    Returns the value together with the number of observations it was computed
+    over, which is what the cross-validation loss divides by.
+    """
+    cdef SEXP a[6]
+    cdef SEXP out, nobs
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _fitted_sexp(fitted)
+        a[1] = _dataframe(data)
+        a[2] = Rf_ScalarLogical(1 if by_sample else 0)
+        a[3] = _str_vector([str(v) for v in (keep or fitted.nodes)])
+        a[4] = Rf_ScalarLogical(0)
+        a[5] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>loglikelihood_function, a, 6)
+
+        nobs = Rf_getAttrib(out, Rf_install(b"nobs"))
+        values = _read_real(out, Rf_length(out))
+
+        return {
+            "loglik": values if by_sample else float(values[0]),
+            "nobs": float(REAL(nobs)[0]) if nobs != R_NilValue else len(data),
+        }
+    finally:
+        pybn_arena_pop()
