@@ -79,22 +79,23 @@ cannot tell that a category was lost before it ever saw the frame.
 | Conditional independence tests | `mi`, `mi-adf`, `mi-sh`, `x2`, `x2-adf` (discrete); `cor`, `zf`, `mi-g`, `mi-g-sh` (Gaussian) |
 | Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge` |
 | Structure learning (score-based) | `hc`, `tabu` — whitelists, blacklists, `maxp`, arbitrary starting networks |
-| Structure learning (constraint-based) | `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `mmpc`, `si_hiton_pc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
+| Structure learning (constraint-based) | `pc_stable`, `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `mmpc`, `si_hiton_pc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
+| Structure learning (hybrid) | `mmhc`, `rsmax2` — any ported restrict/maximize pair |
 | Structure learning (pairwise) | `chow_liu`, `aracne` |
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams` |
 | Utilities | `score`, `modelstring` |
 
 Not yet ported: the remaining constraint-based and hybrid algorithms
-(`pc.stable`, `fast.iamb`, `hpc`, `mmhc`, `rsmax2`, `h2pc`), parameter
-learning (`bn.fit`), inference
+(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), parameter learning
+(`bn.fit`), inference
 (`cpquery`, `rbn`), cross-validation, bootstrap, classifiers, conditional
 Gaussian networks, incomplete data, non-uniform graph priors, and random
 restarts for `hc`.
 
 ## Verified against R
 
-`pytest` runs 718 checks, 689 of which compare directly against values produced
+`pytest` runs 816 checks, 785 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -102,10 +103,12 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 82 hill-climbing runs across 8 data sets, 13 scores, non-default
   hyperparameters, whitelists, blacklists and parent limits, each comparing the
   arc set, the model string and the per-node scores;
-* 198 constraint-based runs across `gs`, `iamb`, `inter_iamb`, `iamb_fdr`,
-  `mmpc` and `si_hiton_pc`, 6 data sets, 7 independence tests, several
-  significance levels, constraint sets and both directed and undirected
-  output, comparing the arc set including direction;
+* 231 constraint-based runs across `pc_stable`, `gs`, `iamb`, `inter_iamb`,
+  `iamb_fdr`, `mmpc` and `si_hiton_pc`, 6 data sets, 7 independence tests,
+  several significance levels, constraint sets and both directed and
+  undirected output, comparing the arc set including direction;
+* 64 hybrid runs across `mmhc` and `rsmax2`, covering every ported
+  restrict/maximize pair and arguments passed through to each phase;
 * 63 tabu searches across 8 data sets, 9 scores, tabu list sizes from 1 to 30,
   constraints and parent limits — 13 of which R's tabu resolves differently
   from R's hc, so the tabu-specific paths are actually covered rather than
@@ -123,6 +126,7 @@ Rscript tools/gen_r_hc_fixtures.R
 Rscript tools/gen_r_constraint_fixtures.R
 Rscript tools/gen_r_graph_fixtures.R
 Rscript tools/gen_r_tabu_fixtures.R
+Rscript tools/gen_r_hybrid_fixtures.R
 ```
 
 ## Performance

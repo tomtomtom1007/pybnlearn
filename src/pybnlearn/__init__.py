@@ -6,7 +6,9 @@ merely resembling them.  See NOTICE for attribution and licensing.
 """
 
 from ._core import BNLearnError, ci_test
-from .constraint import gs, iamb, iamb_fdr, inter_iamb, mmpc, si_hiton_pc
+from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
+                         si_hiton_pc)
+from .hybrid import h2pc, mmhc, rsmax2
 from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
                     model2network, moral, nparams, pdag2dag, shd, skeleton,
                     subgraph)
@@ -16,7 +18,7 @@ __all__ = [
     "BNLearnError", "BayesianNetwork",
     # structure learning
     "aracne", "chow_liu", "gs", "hc", "iamb", "iamb_fdr", "inter_iamb",
-    "mmpc", "si_hiton_pc", "tabu",
+    "mmhc", "mmpc", "pc_stable", "rsmax2", "si_hiton_pc", "tabu",
     # testing and scoring
     "ci_test", "score",
     # graphs

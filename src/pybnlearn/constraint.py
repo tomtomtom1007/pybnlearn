@@ -25,12 +25,13 @@ import warnings
 
 import pandas as pd
 
-from ._core import Tester, cpdag_arcs, recover_structure
+from ._core import (Tester, cpdag_arcs, neighbourhoods,
+                    recover_structure)
 from .structure import (BayesianNetwork, _check_complete, _data_type,
                         build_blacklist)
 
 __all__ = ["gs", "iamb", "iamb_fdr", "inter_iamb", "mmpc",
-           "si_hiton_pc"]
+           "pc_stable", "si_hiton_pc"]
 
 
 _DISCRETE_TESTS = {"mi", "mi-adf", "mi-sh", "x2", "x2-adf"}
@@ -490,12 +491,133 @@ def _set_arc(arcs, frm, to):
 
 
 # ---------------------------------------------------------------------------
+# PC-stable
+#
+# This one does not fit the Markov-blanket shape at all: it starts from the
+# complete graph and removes edges, growing the conditioning sets one node at a
+# time, and it remembers the separating set that removed each edge.  The
+# orientation phase then reads those sets instead of running fresh tests, which
+# is what makes it "stable" -- the result does not depend on the order the
+# nodes happen to be in.
+# ---------------------------------------------------------------------------
+
+def _adjacent(skeleton, node, exclude):
+    """The nodes adjacent to `node` in the current skeleton.
+
+    Order matters: it decides the order allsubs.test() enumerates candidate
+    separating sets in, and so which one is found first when several separate
+    the pair.  That set is stored and later decides v-structures.
+    """
+    out = [a for a, b in skeleton if b == node]
+    out += [b for a, b in skeleton if a == node]
+    return [n for n in dict.fromkeys(out) if n != exclude]
+
+
+def _pc_heuristic(tester, pair, alpha, whitelist, blacklist, skeleton,
+                  dsep_size):
+    x, y = pair["arc"]
+
+    if _listed(whitelist, (x, y), either=True):
+        return {"arc": (x, y), "p.value": 0.0, "dsep.set": None,
+                "max.adjacent": 0}
+    if _listed(blacklist, (x, y), both=True):
+        return {"arc": (x, y), "p.value": 1.0, "dsep.set": None,
+                "max.adjacent": 0}
+
+    # already separated by an earlier, smaller conditioning set.
+    if pair["dsep.set"] is not None:
+        return pair
+
+    nbr1 = _adjacent(skeleton, x, y)
+    nbr2 = _adjacent(skeleton, y, x)
+
+    if len(nbr1) < dsep_size and len(nbr2) < dsep_size:
+        return {"arc": (x, y), "p.value": pair["p.value"],
+                "dsep.set": pair["dsep.set"], "max.adjacent": 0}
+
+    if len(nbr1) >= dsep_size:
+        result = tester.allsubs(x, y, sx=nbr1, alpha=alpha,
+                                min=dsep_size, max=dsep_size)
+        if result["p.value"] > alpha:
+            return {"arc": (x, y), "p.value": result["p.value"],
+                    "dsep.set": result["dsep.set"], "max.adjacent": 0}
+
+    # Testing the second endpoint is redundant when the conditioning sets are
+    # of size one (the same single node would be tried again) or when the two
+    # neighbourhoods coincide.
+    if dsep_size == 1:
+        nbr2 = [n for n in nbr2 if n not in nbr1]
+
+    if len(nbr2) >= dsep_size and dsep_size > 0 and set(nbr1) != set(nbr2):
+        result = tester.allsubs(y, x, sx=nbr2, alpha=alpha,
+                                min=dsep_size, max=dsep_size)
+        if result["p.value"] > alpha:
+            return {"arc": (x, y), "p.value": result["p.value"],
+                    "dsep.set": result["dsep.set"], "max.adjacent": 0}
+
+    return {"arc": (x, y), "p.value": 0.0, "dsep.set": None,
+            "max.adjacent": max(len(nbr1), len(nbr2))}
+
+
+def _pc_stable_backend(tester, nodes, alpha, whitelist, blacklist, max_sx):
+    n = len(nodes)
+    pairs = [{"arc": pair, "p.value": None, "dsep.set": None,
+              "max.adjacent": n - 1}
+             for pair in itertools.combinations(nodes, 2)]
+    skeleton = [p["arc"] for p in pairs]
+    nbr_size = [n - 1] * len(pairs)
+
+    for dsep_size in range(0, min(max_sx, n - 2) + 1):
+        for i, pair in enumerate(pairs):
+            if dsep_size <= nbr_size[i]:
+                pairs[i] = _pc_heuristic(tester, pair, alpha, whitelist,
+                                         blacklist, skeleton, dsep_size)
+
+        skeleton = [p["arc"] for p in pairs if p["p.value"] < alpha]
+        nbr_size = [p["max.adjacent"] for p in pairs]
+
+        if all(size <= dsep_size for size in nbr_size):
+            break
+
+    both = [a for pair in skeleton for a in (pair, (pair[1], pair[0]))]
+    return neighbourhoods(nodes, both), pairs
+
+
+def _vstruct_detect_from_dsep(nodes, arcs, pairs, alpha):
+    """vstruct.detect() using the separating sets pc.stable stored.
+
+    An unshielded triple y - x - z is a v-structure exactly when x is not in
+    the set that separated y and z, so no further tests are needed.
+    """
+    by_pair = {frozenset(p["arc"]): p for p in pairs}
+    found = []
+
+    for x in nodes:
+        incoming = [a for a, b in arcs if b == x]
+        if len(incoming) < 2:
+            continue
+
+        for y, z in itertools.combinations(incoming, 2):
+            if _listed(arcs, (y, z), either=True):
+                continue
+
+            entry = by_pair.get(frozenset((y, z)))
+            if entry is None or entry["dsep.set"] is None:
+                continue
+            if x not in entry["dsep.set"]:
+                found.append((entry["p.value"], y, x, z))
+
+    return found
+
+
+# ---------------------------------------------------------------------------
 # the shared driver
 # ---------------------------------------------------------------------------
 
 def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
                       test, alpha, max_sx, undirected,
-                      markov_blankets=True, empty_dsep=True):
+                      markov_blankets=True, empty_dsep=True,
+                      skeleton_fn=None):
     _check_complete(data)
 
     if not isinstance(data, pd.DataFrame):
@@ -520,6 +642,17 @@ def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
     blacklist = build_blacklist(blacklist, whitelist)
 
     with Tester(data, test) as tester:
+        dsep_pairs = None
+
+        if skeleton_fn is not None:
+            # pc.stable builds the whole skeleton at once and remembers the
+            # separating sets, so it skips the per-node phases entirely.
+            structure, dsep_pairs = skeleton_fn(
+                tester, nodes, alpha, whitelist, blacklist, max_sx)
+            return _orient(tester, data, structure, nodes, algorithm, test,
+                           alpha, max_sx, whitelist, blacklist, undirected,
+                           dsep_pairs)
+
         blankets = {
             node: blanket_fn(tester, node, nodes, alpha, whitelist, blacklist,
                              max_sx)
@@ -547,23 +680,32 @@ def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
 
         structure = recover_structure(structure, nodes, markov_blankets=False)
 
-        arcs = _sets2arcs(structure, nodes)
-        arcs = [a for a in arcs if not _listed(blacklist, a)]
+        return _orient(tester, data, structure, nodes, algorithm, test, alpha,
+                       max_sx, whitelist, blacklist, undirected, None)
 
-        if not undirected:
+
+def _orient(tester, data, structure, nodes, algorithm, test, alpha, max_sx,
+            whitelist, blacklist, undirected, dsep_pairs):
+    """learn.arc.directions(): find the v-structures, apply them, then let
+    cpdag() propagate what follows."""
+    arcs = _sets2arcs(structure, nodes)
+    arcs = [a for a in arcs if not _listed(blacklist, a)]
+
+    if not undirected:
+        if dsep_pairs is not None:
+            vs = _vstruct_detect_from_dsep(nodes, arcs, dsep_pairs, alpha)
+        else:
             vs = _vstruct_detect(tester, nodes, arcs, structure, alpha,
                                  blacklist, max_sx)
-            if vs:
-                vs.sort(key=lambda row: row[0])
 
-                def acyclic(candidate):
-                    return _is_acyclic(candidate, nodes)
+        if vs:
+            vs.sort(key=lambda row: row[0])
+            arcs = _vstruct_apply(arcs, vs, nodes,
+                                  lambda c: _is_acyclic(c, nodes))
 
-                arcs = _vstruct_apply(arcs, vs, nodes, acyclic)
-
-            arcs = cpdag_arcs(arcs, nodes, whitelist=whitelist,
-                              blacklist=blacklist, fix=True,
-                              wlbl=bool(whitelist or blacklist))
+        arcs = cpdag_arcs(arcs, nodes, whitelist=whitelist,
+                          blacklist=blacklist, fix=True,
+                          wlbl=bool(whitelist or blacklist))
 
     return BayesianNetwork(
         nodes, arcs,
@@ -635,6 +777,14 @@ def iamb_fdr(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
     return _constraint_learn(data, _ia_fdr_markov_blanket, "iamb.fdr",
                              whitelist, blacklist, test, alpha, max_sx,
                              undirected)
+
+
+def pc_stable(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
+              max_sx=None, undirected=False):
+    """The order-independent PC algorithm, as bnlearn's pc.stable()."""
+    return _constraint_learn(data, None, "pc.stable", whitelist, blacklist,
+                             test, alpha, max_sx, undirected,
+                             skeleton_fn=_pc_stable_backend)
 
 
 def mmpc(data, whitelist=None, blacklist=None, test=None, alpha=0.05,

@@ -1352,3 +1352,91 @@ def aracne_arcs(data, estimator, whitelist=None, blacklist=None):
         return _arcs_from_sexp(_guarded(<void *>aracne, a, 6))
     finally:
         pybn_arena_pop()
+
+
+def neighbourhoods(node_names, arcs):
+    """cache.structure(): each node's Markov blanket and neighbourhood.
+
+    pc.stable builds its skeleton directly rather than going through the
+    neighbour() step, so it needs this to hand the orientation phase the same
+    structure the other algorithms produce.
+    """
+    cdef SEXP a2[2]
+    cdef SEXP a3[3]
+    cdef SEXP nodes, amat, info, entry
+    cdef int i
+
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        nodes = _str_vector(node_names)
+        a2[0] = _arcs_sexp(arcs)
+        a2[1] = nodes
+        amat = _guarded(<void *>arcs2amat, a2, 2)
+
+        a3[0] = nodes
+        a3[1] = amat
+        a3[2] = Rf_ScalarLogical(0)
+        info = _guarded(<void *>cache_structure, a3, 3)
+
+        result = {}
+        for i, name in enumerate(node_names):
+            entry = Rf_VECTOR_ELT(info, i)
+            names = _names_of(entry)
+            result[name] = {
+                key: _strings(Rf_VECTOR_ELT(entry, j))
+                for j, key in enumerate(names)
+            }
+        return result
+    finally:
+        pybn_arena_pop()
+
+
+def complement_arcs(arcs, node_names, whitelist=None):
+    """hc_to_be_added(): every arc *not* in the given set.
+
+    The hybrid algorithms use this to turn the skeleton found in the restrict
+    phase into a blacklist for the score-based phase that follows.
+    """
+    cdef SEXP a[7]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
+        a[1] = R_NilValue
+        a[2] = _arcs_sexp(whitelist) if whitelist else R_NilValue
+        a[3] = R_NilValue
+        a[4] = Rf_ScalarReal(float("inf"))
+        a[5] = _str_vector(node_names)
+        a[6] = Rf_ScalarLogical(1)
+        return _arcs_from_sexp(_guarded(<void *>hc_to_be_added, a, 7))
+    finally:
+        pybn_arena_pop()
+
+
+cdef extern SEXP pdag_extension(SEXP arcs, SEXP nodes, SEXP debug)
+
+
+def consistent_extension(arcs, node_names):
+    """pdag_extension(): a DAG in the equivalence class of a partially
+    directed graph.
+
+    The hybrid algorithms need this because the constraint-based phase accepts
+    an arc whitelisted in both directions while the score-based phase does not.
+    """
+    cdef SEXP a[3]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs)
+        a[1] = _str_vector(node_names)
+        a[2] = Rf_ScalarLogical(0)
+        return _arcs_from_sexp(_guarded(<void *>pdag_extension, a, 3))
+    finally:
+        pybn_arena_pop()

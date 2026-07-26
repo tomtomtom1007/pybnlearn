@@ -28,6 +28,7 @@ ALGORITHMS = {
     "iamb.fdr": pybnlearn.iamb_fdr,
     "mmpc": pybnlearn.mmpc,
     "si.hiton.pc": pybnlearn.si_hiton_pc,
+    "pc.stable": pybnlearn.pc_stable,
 }
 
 

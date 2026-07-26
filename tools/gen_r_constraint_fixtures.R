@@ -57,7 +57,8 @@ run = function(dataset, algorithm, test, alpha = 0.05, wl = NULL, bl = NULL,
 # mmpc and si.hiton.pc default to undirected = TRUE upstream, but every case
 # here passes `undirected` explicitly so the fixtures cover both modes for all
 # of them and do not silently depend on a default.
-algorithms = c("gs", "iamb", "inter.iamb", "iamb.fdr", "mmpc", "si.hiton.pc")
+algorithms = c("gs", "iamb", "inter.iamb", "iamb.fdr", "mmpc", "si.hiton.pc",
+               "pc.stable")
 discrete = c("learning.test", "asia", "coronary", "lizards")
 continuous = c("gaussian.test", "marks")
 
