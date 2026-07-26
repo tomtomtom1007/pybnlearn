@@ -68,14 +68,33 @@ class BayesianNetwork:
         self.learning = learning or {}
 
     def parents(self, node):
-        return sorted(a for a, b in self.arcs if b == node)
+        """The nodes with a *directed* arc into this one.
+
+        An arc listed in both directions is undirected, and an undirected
+        arc has no parent at the far end of it -- so it is excluded here,
+        the way cache.structure() excludes it in R.  The order is the node
+        order, again as R's is: it decides how parents are listed in a model
+        string and how a conditional probability table's axes come out.
+        """
+        present = set(self.arcs)
+        rank = {n: i for i, n in enumerate(self.nodes)}
+        return sorted((a for a, b in self.arcs
+                       if b == node and (b, a) not in present),
+                      key=rank.__getitem__)
 
     def children(self, node):
-        return sorted(b for a, b in self.arcs if a == node)
+        present = set(self.arcs)
+        rank = {n: i for i, n in enumerate(self.nodes)}
+        return sorted((b for a, b in self.arcs
+                       if a == node and (b, a) not in present),
+                      key=rank.__getitem__)
 
     @property
     def narcs(self):
-        return len(self.arcs)
+        """How many arcs, counting an undirected one once rather than as the
+        two rows it is stored as."""
+        return len({frozenset(arc) if (arc[1], arc[0]) in set(self.arcs)
+                    else arc for arc in self.arcs})
 
     def amat(self):
         """The adjacency matrix, rows and columns ordered as `nodes`."""

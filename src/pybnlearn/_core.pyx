@@ -2170,3 +2170,142 @@ def averaged_arcs(arcs, node_names, weights):
             _guarded(<void *>smart_network_averaging, a, 3))
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# graph properties
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP is_acyclic(SEXP arcs, SEXP nodes, SEXP return_nodes,
+    SEXP directed, SEXP debug)
+cdef extern SEXP has_pdag_path(SEXP frm, SEXP to, SEXP amat, SEXP nrow,
+    SEXP nodes, SEXP underlying, SEXP exclude_direct, SEXP debug)
+cdef extern SEXP connected_components(SEXP x, SEXP debug)
+cdef extern SEXP tiers(SEXP nodes, SEXP debug)
+cdef extern SEXP fitted_mb(SEXP bn, SEXP node)
+
+
+def acyclic(node_names, arcs, bint directed=False):
+    """is_acyclic(): whether the graph has no cycles.
+
+    With directed=False an undirected arc counts as a cycle of length two,
+    which is what makes this the right check for a partially directed graph.
+    """
+    cdef SEXP a[5]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
+        a[1] = _str_vector(node_names)
+        a[2] = Rf_ScalarLogical(0)
+        a[3] = Rf_ScalarLogical(1 if directed else 0)
+        a[4] = Rf_ScalarLogical(0)
+        return bool(_sexp_to_py(_guarded(<void *>is_acyclic, a, 5)))
+    finally:
+        pybn_arena_pop()
+
+
+def path_exists(node_names, arcs, frm, to, bint direct=True,
+                bint underlying=False):
+    """has_pdag_path(): whether one node can be reached from another.
+
+    `direct` decides whether the arc between the two nodes, if there is one,
+    counts as a path in its own right.
+    """
+    cdef SEXP a[8]
+    cdef SEXP a2[2]
+    cdef SEXP amat
+
+    node_names = [str(v) for v in node_names]
+    index = {node: i for i, node in enumerate(node_names)}
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a2[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
+        a2[1] = _str_vector(node_names)
+        amat = _guarded(<void *>arcs2amat, a2, 2)
+
+        a[0] = Rf_ScalarInteger(index[str(frm)] + 1)
+        a[1] = Rf_ScalarInteger(index[str(to)] + 1)
+        a[2] = amat
+        a[3] = Rf_ScalarInteger(len(node_names))
+        a[4] = _str_vector(node_names)
+        a[5] = Rf_ScalarLogical(1 if underlying else 0)
+        a[6] = Rf_ScalarLogical(0 if direct else 1)
+        a[7] = Rf_ScalarLogical(0)
+        return bool(_sexp_to_py(_guarded(<void *>has_pdag_path, a, 8)))
+    finally:
+        pybn_arena_pop()
+
+
+def components(node_names, arcs):
+    """connected_components(): the components and whether each is chordal."""
+    cdef SEXP a[2]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _bn_object(node_names, arcs)
+        a[1] = Rf_ScalarLogical(0)
+        return _sexp_to_py(_guarded(<void *>connected_components, a, 2))
+    finally:
+        pybn_arena_pop()
+
+
+def tier_blacklist(groups):
+    """tiers(): every arc that would run backwards through a node ordering.
+
+    `groups` is a list of tiers; a tier holding several nodes leaves them
+    unordered with respect to each other.
+    """
+    cdef SEXP a[2]
+    cdef SEXP labels
+    cdef int i
+
+    groups = [[str(v) for v in ([g] if isinstance(g, str) else g)]
+              for g in groups]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        if all(len(g) == 1 for g in groups):
+            a[0] = _str_vector([g[0] for g in groups])
+        else:
+            # a list of character vectors, which is how R expresses tiers
+            # that hold more than one node.
+            labels = Rf_allocVector(VECSXP, len(groups))
+            for i in range(len(groups)):
+                Rf_SET_VECTOR_ELT(labels, i, _str_vector(groups[i]))
+            a[0] = labels
+        a[1] = Rf_ScalarLogical(0)
+        return _arcs_from_sexp(_guarded(<void *>tiers, a, 2))
+    finally:
+        pybn_arena_pop()
+
+
+def node_structure(node_names, arcs):
+    """cache_structure(): each node's parents, children, neighbours and
+    Markov blanket, computed the way the search does it."""
+    cdef SEXP a2[2]
+    cdef SEXP a3[3]
+    cdef SEXP amat
+
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a2[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
+        a2[1] = _str_vector(node_names)
+        amat = _guarded(<void *>arcs2amat, a2, 2)
+
+        a3[0] = _str_vector(node_names)
+        a3[1] = amat
+        a3[2] = Rf_ScalarLogical(0)
+        return _sexp_to_py(_guarded(<void *>cache_structure, a3, 3))
+    finally:
+        pybn_arena_pop()

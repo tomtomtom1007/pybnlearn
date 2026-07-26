@@ -12,15 +12,21 @@ from __future__ import annotations
 
 import re
 
-from ._core import (chow_liu_arcs, aracne_arcs, count_parameters, cpdag_arcs,
-                    extend_pdag, structural_hamming, topological_order,
-                    undirected_arcs)
+from ._core import (chow_liu_arcs, aracne_arcs, components, count_parameters,
+                    cpdag_arcs, extend_pdag, structural_hamming,
+                    tier_blacklist, topological_order, undirected_arcs)
+from ._core import acyclic as _acyclic
+from ._core import path_exists as _path_exists
 from .structure import BayesianNetwork, _data_type, build_blacklist
 
 __all__ = [
     "aracne", "chow_liu", "compare", "cpdag", "empty_graph", "hamming",
     "model2network", "moral", "nparams", "pdag2dag", "shd", "skeleton",
     "subgraph",
+    "acyclic", "connected_components", "directed", "leaf_nodes",
+    "node_ordering", "ordering2blacklist", "path_exists", "root_nodes",
+    "set2blacklist", "tiers2blacklist", "valid_cpdag", "valid_dag",
+    "valid_ug",
 ]
 
 
@@ -256,3 +262,221 @@ def aracne(data, whitelist=None, blacklist=None, mi=None):
         "algo": "aracne", "test": estimator, "undirected": True,
         "whitelist": whitelist, "blacklist": blacklist,
     })
+
+
+# ---------------------------------------------------------------------------
+# graph properties, from R/frontend-graph.R
+# ---------------------------------------------------------------------------
+
+def _as_graph(x):
+    """A fitted network answers structural questions from its parameters."""
+    from .nodes import _graph
+
+    return _graph(x)
+
+
+def acyclic(x, directed=False):
+    """Whether the graph contains no cycles.
+
+    With `directed` left off, an undirected arc counts as a cycle of length
+    two -- which is the check that matters for a partially directed graph,
+    and the reason the flag exists.
+    """
+    net = _as_graph(x)
+    return _acyclic(net.nodes, net.arcs, directed=bool(directed))
+
+
+def directed(x):
+    """Whether every arc has a direction."""
+    net = _as_graph(x)
+    present = set(net.arcs)
+    return not any((b, a) in present for a, b in present)
+
+
+def valid_dag(x):
+    """Whether the graph is a directed acyclic graph."""
+    net = _as_graph(x)
+    return directed(net) and acyclic(net, directed=False)
+
+
+def valid_ug(x):
+    """Whether the graph is undirected.
+
+    The empty graph counts, being both directed and undirected at once.
+    """
+    net = _as_graph(x)
+    if not net.arcs:
+        return True
+    present = set(net.arcs)
+    return all((b, a) in present for a, b in present)
+
+
+def valid_cpdag(x):
+    """Whether the graph is the equivalence class of some DAG.
+
+    Being acyclic and partially directed is not enough: the undirected part
+    has to be chordal, and the directions that *are* there have to be
+    exactly the ones the v-structures compel.  The last check is the strong
+    one, and it is done by comparing against cpdag() itself.
+    """
+    net = _as_graph(x)
+
+    if not acyclic(net, directed=True):
+        return False
+    if not all(chordal for _, chordal in connected_components(net)):
+        return False
+
+    return set(cpdag(net).arcs) == set(net.arcs)
+
+
+def connected_components(x):
+    """The connected components of the undirected part, and whether each is
+    chordal.
+
+    bnlearn asks igraph whether a component is chordal; there is no igraph
+    here, so the test below is a maximum-cardinality search.  Chordality is
+    a property of the graph rather than of how you look for it, so any
+    correct test agrees -- unlike most of this package, this is not a port.
+    """
+    net = _as_graph(x)
+    loose = [(a, b) for a, b in net.arcs if (b, a) in set(net.arcs)]
+
+    return [(component, _chordal(component, loose))
+            for component in components(net.nodes, loose)]
+
+
+def _chordal(nodes, arcs):
+    """Maximum cardinality search: number the nodes so that each one is
+    numbered right after as many of its numbered neighbours as possible,
+    then check that every node's earlier neighbours form a clique."""
+    if len(nodes) < 2:
+        return True
+
+    adjacent = {node: set() for node in nodes}
+    for a, b in arcs:
+        if a in adjacent and b in adjacent:
+            adjacent[a].add(b)
+            adjacent[b].add(a)
+
+    weight = {node: 0 for node in nodes}
+    order, numbered = [], set()
+
+    for _ in nodes:
+        node = max((n for n in nodes if n not in numbered),
+                   key=lambda n: (weight[n], -list(nodes).index(n)))
+        order.append(node)
+        numbered.add(node)
+        for other in adjacent[node] - numbered:
+            weight[other] += 1
+
+    position = {node: i for i, node in enumerate(order)}
+    for node in order:
+        earlier = {n for n in adjacent[node] if position[n] < position[node]}
+        if not earlier:
+            continue
+        # the neighbour numbered last among them must be adjacent to the rest
+        parent = max(earlier, key=position.__getitem__)
+        if not (earlier - {parent}) <= adjacent[parent]:
+            return False
+
+    return True
+
+
+def path_exists(x, frm, to, direct=True, underlying_graph=False):
+    """Whether `to` can be reached from `frm`.
+
+    `direct=False` ignores the arc between the two nodes, which is how you
+    ask whether they are connected by anything *other* than being adjacent.
+    """
+    net = _as_graph(x)
+    frm, to = str(frm), str(to)
+
+    for node in (frm, to):
+        if node not in net.nodes:
+            raise ValueError(f"unknown node {node!r}")
+    if frm == to:
+        raise ValueError("'frm' and 'to' must be different from each other")
+
+    return _path_exists(net.nodes, net.arcs, frm, to, direct=bool(direct),
+                        underlying=bool(underlying_graph))
+
+
+def node_ordering(x):
+    """The nodes in topological order; the graph has to be a DAG."""
+    net = _as_graph(x)
+    if not directed(net):
+        raise ValueError("the graph is only partially directed")
+    return net.topological_order()
+
+
+def _adjacent(net):
+    """Every node's neighbours, undirected arcs included."""
+    around = {node: set() for node in net.nodes}
+    for a, b in net.arcs:
+        around[a].add(b)
+        around[b].add(a)
+    return around
+
+
+def root_nodes(x):
+    """The nodes with no parents.
+
+    A node touched by an undirected arc is not a root: the arc might turn
+    out to point at it.  So having no parents is not enough -- every
+    neighbour has to be a child.
+    """
+    net = _as_graph(x)
+    around = _adjacent(net)
+    return [n for n in net.nodes
+            if not net.parents(n) and len(around[n]) == len(net.children(n))]
+
+
+def leaf_nodes(x):
+    """The nodes with no children, and none of whose arcs might become one."""
+    net = _as_graph(x)
+    around = _adjacent(net)
+    return [n for n in net.nodes
+            if not net.children(n) and len(around[n]) == len(net.parents(n))]
+
+
+# ---------------------------------------------------------------------------
+# turning orderings into blacklists
+# ---------------------------------------------------------------------------
+
+def ordering2blacklist(nodes):
+    """Every arc that would run backwards through a node ordering.
+
+    Blacklisting these is how you tell a learning algorithm the order the
+    variables come in without telling it which arcs to draw.
+    """
+    if isinstance(nodes, BayesianNetwork):
+        nodes = nodes.topological_order()
+    elif hasattr(nodes, "nodes") and not isinstance(nodes, (list, tuple)):
+        nodes = _as_graph(nodes).topological_order()
+
+    return tier_blacklist([str(n) for n in nodes])
+
+
+def tiers2blacklist(tiers):
+    """The same, for an ordering that leaves some nodes tied.
+
+    Each element of `tiers` is either a node or a group of nodes; arcs
+    within a group are allowed in both directions, arcs from a later group
+    to an earlier one are not.
+    """
+    return tier_blacklist(tiers)
+
+
+def set2blacklist(nodes):
+    """Every arc between the given nodes, in both directions.
+
+    Blacklisting these keeps a group of variables from being connected to
+    each other while leaving them free to connect to everything else.
+    """
+    nodes = [str(n) for n in nodes]
+    if len(set(nodes)) != len(nodes):
+        raise ValueError("the node labels are not unique")
+
+    # expand.grid() varies the first factor fastest, so the arcs come out
+    # grouped by their target rather than by their source.
+    return [(a, b) for b in nodes for a in nodes if a != b]
