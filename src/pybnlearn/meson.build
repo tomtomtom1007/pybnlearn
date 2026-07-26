@@ -18,7 +18,8 @@ py.extension_module(
 )
 
 py.install_sources(
-  ['__init__.py', 'bootstrap.py', 'classifiers.py', 'constraint.py', 'exact.py', 'fit.py', 'foreign.py', 'graph.py',
+  ['__init__.py', 'bootstrap.py', 'classifiers.py', 'constraint.py', 'divergence.py', 'exact.py', 'fit.py', 'foreign.py',
+   'graph.py',
    'hybrid.py',
    'inference.py', 'mvnorm.py', 'nodes.py', 'preprocessing.py',
    'strength.py',

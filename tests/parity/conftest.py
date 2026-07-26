@@ -32,6 +32,10 @@ CONTINUOUS = {"gaussian.test", "marks"}
 # be inferred per column rather than declared for the whole frame
 MIXED = {"clgaussian.test", "cgsmall"}
 
+# a small, deliberately sparse discrete data set, used where an
+# algorithm changes behaviour when the contingency tables get thin
+SPARSE = {"sparse"}
+
 
 def _levels():
     path = FIXTURES / "levels.json"

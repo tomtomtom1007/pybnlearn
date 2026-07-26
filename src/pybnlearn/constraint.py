@@ -30,8 +30,8 @@ from ._core import (Tester, cpdag_arcs, neighbourhoods,
 from .structure import (BayesianNetwork, _check_complete, _data_type,
                         build_blacklist)
 
-__all__ = ["gs", "iamb", "iamb_fdr", "inter_iamb", "mmpc",
-           "pc_stable", "si_hiton_pc"]
+__all__ = ["fast_iamb", "gs", "iamb", "iamb_fdr", "inter_iamb", "learn_mb",
+           "learn_nbr", "mmpc", "pc_stable", "si_hiton_pc"]
 
 
 _DISCRETE_TESTS = {"mi", "mi-adf", "mi-sh", "x2", "x2-adf"}
@@ -810,3 +810,203 @@ def si_hiton_pc(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
     return _constraint_learn(data, _hiton_forward, "si.hiton.pc", whitelist,
                              blacklist, test, alpha, max_sx, undirected,
                              markov_blankets=False, empty_dsep=False)
+
+
+def _observations_per_cell(counts, n, target, node, conditioning):
+    """obs.per.cell(): how thinly the data are spread over the contingency
+    table a test would build.
+
+    Continuous data have no cells, so R returns infinity and the caller's
+    countermeasure never fires.
+    """
+    if counts is None:
+        return float("inf")
+
+    cells = counts[target] * counts[node]
+    for name in conditioning:
+        cells *= counts[name]
+    return n / cells
+
+
+def _fast_ia_markov_blanket(counts, n):
+    """fast.ia.markov.blanket(): IAMB that adds several nodes per pass.
+
+    Ordinary IAMB adds the single best candidate and then re-tests
+    everything.  This one sorts every candidate that looks associated and
+    adds them all speculatively, then removes what the round-robin pass
+    rejects -- far fewer passes over the data, at the cost of admitting
+    nodes on evidence that a later test may overturn.
+
+    The speculation stops when the contingency table would get too sparse
+    for an asymptotic test to mean anything, which is the `obs.per.cell`
+    check and the reason this needs the data as well as the tester.
+    """
+    def blanket(tester, target, nodes, alpha, whitelist, blacklist, max_sx):
+        candidates = [x for x in nodes if x != target]
+        whitelisted = [y for y in candidates
+                       if _listed(whitelist, (target, y), either=True)]
+
+        mb = list(dict.fromkeys(whitelisted))
+        candidates = [x for x in candidates if x not in mb]
+        insufficient = False
+
+        while True:
+            remaining = [x for x in candidates if x not in mb]
+            if not remaining or len(mb) > max_sx:
+                break
+
+            snapshot = list(mb)
+            insufficient = False
+
+            association = tester.pvalues(remaining, target, mb)
+            if all(p > alpha for p in association.values()):
+                break
+
+            # every candidate that looks associated, strongest first.
+            admitted = sorted((x for x, p in association.items()
+                               if p <= alpha),
+                              key=lambda x: association[x])
+
+            for node in admitted:
+                if len(mb) > max_sx:
+                    continue
+
+                if _observations_per_cell(counts, n, target, node, mb) < 5:
+                    # adding this would make the next round of tests
+                    # meaningless; stop rather than test on air.
+                    insufficient = True
+                    break
+
+                mb.append(node)
+
+            before = len(mb)
+
+            fixed = [x for x in whitelisted if x]
+            pv = tester.roundrobin(target, mb, fixed=fixed, alpha=alpha)
+            keep = {k for k, v in pv.items() if v < alpha} | set(fixed)
+            mb = [x for x in mb if x in keep]
+
+            if mb == snapshot:
+                break
+            if insufficient and before == len(mb):
+                break
+
+            candidates = [x for x in candidates if x not in mb]
+
+        return mb
+
+    return blanket
+
+
+def _level_counts(data):
+    """How many levels each variable has, or None for continuous data."""
+    if _data_type(data) != "discrete":
+        return None
+    return {str(c): len(data[c].astype("category").cat.categories)
+            for c in data.columns}
+
+
+def fast_iamb(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
+              max_sx=None, undirected=False):
+    """Fast Incremental Association, as bnlearn's fast.iamb().
+
+    The same answer IAMB is looking for, reached in fewer passes over the
+    data by admitting several nodes at a time and letting the backward pass
+    sort them out.
+
+    bnlearn has deprecated this and will remove it in 2027; it is here so
+    that code written against R's version keeps working, not because it is
+    a good default.  `iamb` or `inter_iamb` are the ones to reach for.
+    """
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas DataFrame")
+
+    blanket = _fast_ia_markov_blanket(_level_counts(data), len(data))
+    return _constraint_learn(data, blanket, "fast.iamb", whitelist, blacklist,
+                             test, alpha, max_sx, undirected)
+
+
+_BLANKETS = {
+    "gs": _gs_markov_blanket,
+    "iamb": _ia_markov_blanket,
+    "inter.iamb": _inter_ia_markov_blanket,
+    "iamb.fdr": _ia_fdr_markov_blanket,
+}
+
+
+_NEIGHBOURHOODS = {
+    "mmpc": _mmpc_forward,
+    "si.hiton.pc": _hiton_forward,
+}
+
+
+def learn_mb(data, node, method="gs", whitelist=None, blacklist=None,
+             test=None, alpha=0.05, max_sx=None):
+    """The Markov blanket of one node, without learning the whole network.
+
+    Useful when only one variable matters: the blanket is everything needed
+    to predict it, and finding it costs a fraction of a full structure
+    learning run.
+
+    Only the algorithms that look for a blanket in the first place are
+    accepted, which is R's rule too -- the neighbourhood algorithms never
+    compute one.
+    """
+    if method == "fast.iamb":
+        blanket_fn = _fast_ia_markov_blanket(_level_counts(data), len(data))
+    elif method in _BLANKETS:
+        blanket_fn = _BLANKETS[method]
+    else:
+        raise ValueError(
+            f"{method!r} does not learn Markov blankets; the ones that do "
+            "are " + ", ".join(sorted(_BLANKETS) + ["fast.iamb"]))
+
+    return _learn_local(data, node, blanket_fn, whitelist, blacklist, test,
+                        alpha, max_sx)
+
+
+def learn_nbr(data, node, method="mmpc", whitelist=None, blacklist=None,
+              test=None, alpha=0.05, max_sx=None):
+    """The neighbours of one node: the nodes adjacent to it in the graph,
+    which is its Markov blanket without the spouses."""
+    if method not in _NEIGHBOURHOODS:
+        raise ValueError(
+            f"{method!r} does not learn neighbourhoods; the ones that do are "
+            + ", ".join(sorted(_NEIGHBOURHOODS)))
+
+    def blanket(tester, target, nodes, alpha, whitelist, blacklist, max_sx):
+        # the forward phase proposes, and the backward phase disposes: a
+        # candidate stays only if no subset of the others separates it from
+        # the target.  Skipping it leaves in nodes that are two steps away.
+        found = _NEIGHBOURHOODS[method](tester, target, nodes, alpha,
+                                        whitelist, blacklist, max_sx)
+        return _neighbour(tester, target, {target: found}, alpha, whitelist,
+                          blacklist, max_sx, markov=False,
+                          empty_dsep=True)["nbr"]
+
+    return _learn_local(data, node, blanket, whitelist, blacklist, test,
+                        alpha, max_sx)
+
+
+def _learn_local(data, node, blanket_fn, whitelist, blacklist, test, alpha,
+                 max_sx):
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas DataFrame")
+
+    _check_complete(data)
+
+    nodes = [str(c) for c in data.columns]
+    node = str(node)
+    if node not in nodes:
+        raise ValueError(f"unknown node {node!r}")
+
+    test = _check_test(test, data)
+    max_sx = len(nodes) if max_sx is None else int(max_sx)
+
+    whitelist = [(str(a), str(b)) for a, b in (whitelist or ())]
+    blacklist = build_blacklist(
+        [(str(a), str(b)) for a, b in (blacklist or ())], whitelist)
+
+    with Tester(data, test) as tester:
+        return blanket_fn(tester, node, nodes, alpha, whitelist, blacklist,
+                          max_sx)

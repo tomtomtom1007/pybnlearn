@@ -8,8 +8,9 @@ merely resembling them.  See NOTICE for attribution and licensing.
 from ._core import BNLearnError, ci_test
 from .bootstrap import CrossValidation, bn_cv, boot_strength
 from .classifiers import classify, naive_bayes, tree_bayes
-from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
-                         si_hiton_pc)
+from .constraint import (fast_iamb, gs, iamb, iamb_fdr, inter_iamb, learn_mb,
+                         learn_nbr, mmpc, pc_stable, si_hiton_pc)
+from .divergence import H, KL
 from .exact import Factor, query
 from .fit import (ConditionalGaussianNode, DiscreteNode, FittedNetwork,
                   GaussianNode, bn_net, custom_fit, fit, identifiable,
@@ -48,14 +49,14 @@ __all__ = [
     "Factor", "FittedNetwork", "GaussianNode", "MultivariateNormal",
     # structure learning: score-based, constraint-based, hybrid, pairwise
     "hc", "tabu",
-    "gs", "iamb", "iamb_fdr", "inter_iamb", "mmpc", "pc_stable",
-    "si_hiton_pc",
+    "gs", "iamb", "iamb_fdr", "inter_iamb", "fast_iamb", "mmpc", "pc_stable",
+    "si_hiton_pc", "learn_mb", "learn_nbr",
     "h2pc", "mmhc", "rsmax2",
     "aracne", "chow_liu",
     # classifiers
     "classify", "naive_bayes", "tree_bayes",
     # testing and scoring
-    "ci_test", "score", "alpha_star", "BF",
+    "ci_test", "score", "alpha_star", "BF", "H", "KL",
     "whitelist", "blacklist", "ntests",
     # preprocessing
     "discretize", "configs",
