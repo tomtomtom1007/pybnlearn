@@ -10,12 +10,12 @@ from .constraint import gs, iamb, inter_iamb
 from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
                     model2network, moral, nparams, pdag2dag, shd, skeleton,
                     subgraph)
-from .structure import BayesianNetwork, hc, score
+from .structure import BayesianNetwork, hc, score, tabu
 
 __all__ = [
     "BNLearnError", "BayesianNetwork",
     # structure learning
-    "aracne", "chow_liu", "gs", "hc", "iamb", "inter_iamb",
+    "aracne", "chow_liu", "gs", "hc", "iamb", "inter_iamb", "tabu",
     # testing and scoring
     "ci_test", "score",
     # graphs

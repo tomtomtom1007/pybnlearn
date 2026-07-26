@@ -117,3 +117,31 @@ def test_modelstring_round_trips_through_arcs(discrete):
     learned = pybnlearn.hc(discrete)
     assert learned.modelstring().count("[") == len(learned.nodes)
     assert set(learned.topological_order()) == set(learned.nodes)
+
+
+def test_tabu_returns_the_best_network_not_the_last(discrete):
+    """Tabu keeps walking after the score stops improving, so what it returns
+    has to be the best network it saw, never wherever the walk ended."""
+    learned = pybnlearn.tabu(discrete, tabu=5)
+    walked = pybnlearn.hc(discrete)
+
+    assert pybnlearn.score(learned, discrete) >= \
+        pybnlearn.score(walked, discrete) - 1e-9
+
+
+def test_tabu_memory_is_flat_across_runs(discrete):
+    """The tabu list holds hashes for the whole search rather than per call,
+    which is exactly the kind of thing that leaks if it is built wrong."""
+    import resource
+
+    def rss_mb():
+        raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return raw / 1e6 if raw > 1e7 else raw / 1e3
+
+    for _ in range(20):
+        pybnlearn.tabu(discrete, tabu=10)
+    baseline = rss_mb()
+    for _ in range(200):
+        pybnlearn.tabu(discrete, tabu=10)
+
+    assert rss_mb() - baseline < 50, "memory grew across repeated searches"

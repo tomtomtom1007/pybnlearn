@@ -24,7 +24,7 @@ import pandas as pd
 
 from ._core import Search, topological_order
 
-__all__ = ["BayesianNetwork", "hc", "score"]
+__all__ = ["BayesianNetwork", "hc", "score", "tabu"]
 
 
 # Scores that are score-equivalent, and so let the search reuse the cached
@@ -457,6 +457,195 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
             "optimized": optimized,
             "whitelist": list(whitelist or ()),
             "blacklist": list(blacklist or ()),
+            "iterations": iterations,
+        },
+    )
+
+
+def _robust_score_difference(new, old):
+    """robust.score.difference(): compare two network scores.
+
+    Networks with a singular node score -inf, and R is careful that -inf minus
+    -inf reads as "no improvement" rather than NaN, and that anything finite
+    beats -inf.  The tolerance keeps floating-point noise from registering as
+    an improvement and letting the search cycle.
+    """
+    if new == -math.inf and old == -math.inf:
+        return -math.inf
+    if new != -math.inf and old == -math.inf:
+        return abs(new)
+    if abs(new - old) < math.sqrt(np.finfo(float).eps):
+        return 0.0
+    return new - old
+
+
+def tabu(data, start=None, whitelist=None, blacklist=None, score=None,
+         tabu=10, max_iter=float("inf"), maxp=float("inf"), optimized=True,
+         **extra_args):
+    """Learn a network structure by tabu search, as bnlearn's tabu() does.
+
+    Unlike hill climbing, this keeps going when no move improves the score: it
+    takes the least bad move instead, refusing any that would return to one of
+    the last `tabu` networks, and gives up only after `tabu` consecutive
+    iterations without beating the best network it has seen.  That best network
+    is what comes back, not wherever the walk happened to stop.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+    start : BayesianNetwork, optional
+    whitelist, blacklist : sequence of (from, to), optional
+    score : str, optional
+        Defaults to "bic" for discrete data and "bic-g" for continuous data.
+    tabu : int
+        How many previous networks to remember, and how many fruitless
+        iterations to tolerate.
+    maxp : int, optional
+        The largest number of parents any node may have.
+
+    Returns
+    -------
+    BayesianNetwork
+    """
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas DataFrame")
+    if data.shape[1] < 2:
+        raise ValueError("at least two variables are needed")
+    if int(tabu) < 1:
+        raise ValueError("the tabu list must have at least one slot")
+
+    _check_complete(data)
+
+    tabu = int(tabu)
+    nodes = [str(c) for c in data.columns]
+    n = len(nodes)
+    index = {node: i for i, node in enumerate(nodes)}
+
+    score = _check_score(score, data)
+    extra = _check_score_args(score, data, extra_args)
+
+    blacklist = build_blacklist(blacklist, whitelist)
+
+    def _amat_of(pairs):
+        out = np.zeros((n, n), dtype=np.int32)
+        for a, b in pairs or ():
+            if a not in index or b not in index:
+                raise ValueError(f"unknown node in arc ({a}, {b})")
+            out[index[a], index[b]] = 1
+        return out
+
+    blmat = _amat_of(blacklist)
+    wlmat = _amat_of(whitelist)
+
+    arcs = list(start.arcs) if start is not None else []
+    for a, b in whitelist or ():
+        arcs = _set_arc(arcs, a, b)
+    arcs = [(a, b) for a, b in arcs if not blmat[index[a], index[b]]]
+
+    equivalence = _is_score_equivalent(score, extra) and optimized
+    decomposable = _is_score_decomposable(score, extra)
+
+    with Search(data, nodes, score, extra, blmat, wlmat) as search:
+        search.enable_tabu(tabu)
+
+        if not search.acyclic(arcs):
+            raise ValueError("the starting network contains cycles")
+
+        search.set_reference(search.node_scores(arcs, nodes))
+
+        updated = list(range(n))
+        iterations = 1
+        loss_iter = 0
+        best_score = -math.inf
+        best_arcs = None
+
+        while True:
+            current = (iterations - 1) % tabu
+            reference = search.get_reference()
+            total = float(reference.sum())
+
+            # Keep the best network seen so far; the search returns that, not
+            # wherever it stops.
+            if total == -math.inf and best_score == -math.inf and iterations > 1:
+                old = search.node_scores(best_arcs, nodes)
+                singular_old = old == -math.inf
+                singular_new = reference == -math.inf
+
+                if np.array_equal(singular_old, singular_new):
+                    # the same nodes are singular in both, so compare only the
+                    # nodes that actually have a score.
+                    delta = _robust_score_difference(
+                        float(reference[~singular_new].sum()),
+                        float(old[~singular_old].sum()))
+                elif singular_new.sum() > singular_old.sum():
+                    delta = -math.inf
+                elif singular_new.sum() < singular_old.sum():
+                    delta = math.inf
+                else:
+                    delta = _robust_score_difference(total, best_score)
+
+                if delta > 0:
+                    best_arcs, best_score = list(arcs), total
+            elif (_robust_score_difference(total, best_score) > 0
+                  or iterations == 1):
+                best_arcs, best_score = list(arcs), total
+
+            amat = search.arcs_to_amat(arcs)
+            nparents = amat.sum(axis=0).astype(np.float64)
+
+            search.hash_network(amat, current)
+            search.fill_cache(
+                arcs, updated if optimized else list(range(n)),
+                amat, equivalence, decomposable)
+            candidates = search.to_be_added(amat, nparents, maxp)
+
+            best = search.tabu_best_step(amat, candidates, nparents, maxp,
+                                         current, 0.0)
+
+            if best is None:
+                if loss_iter >= tabu:
+                    arcs = best_arcs
+                    break
+                loss_iter += 1
+
+                # nothing improves the score: take the least bad move instead.
+                best = search.tabu_best_step(amat, candidates, nparents, maxp,
+                                             current, -math.inf)
+                if best is None:
+                    if loss_iter > 0:
+                        arcs = best_arcs
+                    break
+            elif _robust_score_difference(
+                    float(search.get_reference().sum()), best_score) > 0:
+                # The reference scores have to be re-read here: tabu_best_step
+                # folded the chosen move's delta into them, so this compares
+                # the score *after* the move, as R does.  Using the value from
+                # the top of the loop resets the counter one iteration late and
+                # the search stops in the wrong place.
+                loss_iter = 0
+
+            frm, to, op = best["from"], best["to"], best["op"]
+            arcs = _apply(arcs, op, frm, to)
+
+            updated = ([index[frm], index[to]] if op == "reverse"
+                       else [index[to]])
+
+            if iterations >= max_iter:
+                if loss_iter > 0:
+                    arcs = best_arcs
+                break
+            iterations += 1
+
+    return BayesianNetwork(
+        nodes, arcs,
+        learning={
+            "algo": "tabu",
+            "test": score,
+            "args": extra,
+            "optimized": optimized,
+            "whitelist": list(whitelist or ()),
+            "blacklist": list(blacklist or ()),
+            "tabu": tabu,
             "iterations": iterations,
         },
     )

@@ -462,6 +462,10 @@ cdef extern SEXP score_cache_fill(SEXP nodes, SEXP data, SEXP network,
 cdef extern SEXP hc_opt_step(SEXP amat, SEXP nodes, SEXP added, SEXP cache,
     SEXP reference, SEXP wlmat, SEXP blmat, SEXP nparents, SEXP maxp,
     SEXP debug)
+cdef extern SEXP tabu_hash(SEXP amat, SEXP nodes, SEXP list, SEXP current)
+cdef extern SEXP tabu_step(SEXP amat, SEXP nodes, SEXP added, SEXP cache,
+    SEXP reference, SEXP wlmat, SEXP blmat, SEXP tabu_list, SEXP current,
+    SEXP baseline, SEXP nparents, SEXP maxp, SEXP debug)
 cdef extern SEXP hc_to_be_added(SEXP arcs, SEXP blacklist, SEXP whitelist,
     SEXP nparents, SEXP maxp, SEXP nodes, SEXP convert)
 cdef extern SEXP is_acyclic(SEXP arcs, SEXP nodes, SEXP return_nodes,
@@ -554,7 +558,10 @@ cdef class Search:
     cdef SEXP wlmat
     cdef SEXP score
     cdef SEXP extra
+    cdef SEXP tabu_list
+    cdef SEXP amat_buf
     cdef int n
+    cdef int tabu_size
     cdef bint live
     cdef object node_names
 
@@ -588,6 +595,96 @@ cdef class Search:
         Rf_setAttrib(self.cache, R_DimSymbol, dim)
 
         self.reference = _real_named(np.zeros(self.n), self.node_names)
+
+        self.tabu_list = NULL
+        self.amat_buf = NULL
+        self.tabu_size = 0
+
+    def enable_tabu(self, int size):
+        """Allocate the tabu list.
+
+        tabu_hash() writes each visited network's hash into a slot of this
+        list, and tabu_step() reads the whole list back to know which moves
+        would revisit one -- so, like the cache, it has to be the same object
+        across the whole search.
+        """
+        cdef int i
+        if size < 1:
+            raise ValueError("the tabu list must have at least one slot")
+        cdef SEXP dim
+        self.tabu_size = size
+        self.tabu_list = Rf_allocVector(VECSXP, size)
+        for i in range(size):
+            Rf_SET_VECTOR_ELT(self.tabu_list, i, R_NilValue)
+
+        # A session-owned adjacency matrix for hash_network() to fill.  The
+        # hash tabu_hash() computes is stored *into* the tabu list, so it must
+        # outlive the call -- which rules out building the matrix in a nested
+        # arena, because popping that arena would free the hash along with it
+        # and leave the list holding dangling pointers.  Reusing one buffer
+        # keeps the hash in the session arena without leaking a matrix per
+        # iteration.
+        self.amat_buf = Rf_allocVector(INTSXP, self.n * self.n)
+        dim = Rf_allocVector(INTSXP, 2)
+        INTEGER(dim)[0] = self.n
+        INTEGER(dim)[1] = self.n
+        Rf_setAttrib(self.amat_buf, R_DimSymbol, dim)
+
+    def hash_network(self, amat, int current):
+        """tabu_hash(): record the current network in slot `current`.
+
+        Deliberately not wrapped in a nested arena: the hash this computes is
+        stored in the tabu list and has to survive until the search ends.
+        """
+        cdef SEXP a[4]
+        cdef cnp.ndarray[cnp.int32_t, ndim=2] m
+        cdef int i, j
+        if self.tabu_list == NULL:
+            raise RuntimeError("enable_tabu() has not been called")
+
+        m = np.ascontiguousarray(amat, dtype=np.int32)
+        for j in range(self.n):
+            for i in range(self.n):
+                INTEGER(self.amat_buf)[j * self.n + i] = m[i, j]
+
+        a[0] = self.amat_buf
+        a[1] = self.nodes
+        a[2] = self.tabu_list
+        a[3] = Rf_ScalarInteger(current)
+        _guarded(<void *>tabu_hash, a, 4)
+
+    def tabu_best_step(self, amat, added, nparents, double maxp,
+                       int current, double baseline):
+        """tabu_step(): the best move that does not return to a network in
+        the tabu list.
+
+        With `baseline` at 0 this only accepts moves that improve the score;
+        at -inf it accepts the least bad move, which is how the search escapes
+        a local optimum.  Like hc_opt_step() it folds the chosen delta into the
+        reference scores in place.
+        """
+        cdef SEXP a[13]
+        if self.tabu_list == NULL:
+            raise RuntimeError("enable_tabu() has not been called")
+        pybn_arena_push()
+        try:
+            a[0] = _int_matrix(amat)
+            a[1] = self.nodes
+            a[2] = _int_matrix(added)
+            a[3] = self.cache
+            a[4] = self.reference
+            a[5] = self.wlmat
+            a[6] = self.blmat
+            a[7] = self.tabu_list
+            a[8] = Rf_ScalarInteger(current)
+            a[9] = Rf_ScalarReal(baseline)
+            a[10] = _real_named(nparents, None)
+            a[11] = Rf_ScalarReal(maxp)
+            a[12] = Rf_ScalarLogical(0)
+            result = _sexp_to_py(_guarded(<void *>tabu_step, a, 13))
+            return None if result["op"] is False else result
+        finally:
+            pybn_arena_pop()
 
     def close(self):
         if self.live:
