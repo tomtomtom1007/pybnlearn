@@ -19,18 +19,26 @@ from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
 from .structure import BayesianNetwork, hc, score, tabu
 
 __all__ = [
-    "BNLearnError", "BayesianNetwork", "FittedNetwork",
-    "CrossValidation", "DiscreteNode", "GaussianNode",
-    # structure learning
-    "aracne", "chow_liu", "gs", "hc", "iamb", "iamb_fdr", "inter_iamb",
-    "mmhc", "mmpc", "pc_stable", "rsmax2", "si_hiton_pc", "tabu",
+    # types
+    "BNLearnError", "BayesianNetwork", "CrossValidation", "DiscreteNode",
+    "FittedNetwork", "GaussianNode",
+    # structure learning: score-based, constraint-based, hybrid, pairwise
+    "hc", "tabu",
+    "gs", "iamb", "iamb_fdr", "inter_iamb", "mmpc", "pc_stable",
+    "si_hiton_pc",
+    "h2pc", "mmhc", "rsmax2",
+    "aracne", "chow_liu",
+    # classifiers
+    "classify", "naive_bayes", "tree_bayes",
     # testing and scoring
     "ci_test", "score",
-    # parameter learning
-    "fit", "predict", "classify",
+    # parameter learning and prediction
+    "fit", "predict",
     # simulation and inference
     "cpdist", "cpquery", "rbn", "set_seed",
-    # graphs
+    # resampling
+    "bn_cv", "boot_strength",
+    # graphs and comparison
     "compare", "cpdag", "empty_graph", "hamming", "model2network", "moral",
     "nparams", "pdag2dag", "shd", "skeleton", "subgraph",
 ]

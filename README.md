@@ -125,7 +125,7 @@ non-uniform graph priors, and random restarts for `hc`.
 
 ## Verified against R
 
-`pytest` runs 1110 checks, 1052 of which compare directly against values produced
+`pytest` runs 1112 checks, 1052 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each

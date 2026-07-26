@@ -186,3 +186,28 @@ def test_iamb_fdr_warns_rather_than_looping(discrete):
     with w.catch_warnings():
         w.simplefilter("error")          # any infinite-loop warning becomes an
         pybnlearn.iamb_fdr(discrete)     # error, but it must still terminate
+
+
+def test_every_public_name_is_exported():
+    """__all__ is the documented API surface, and it is edited by hand.
+
+    Two functions shipped importable but missing from it before this test
+    existed, which meant they were absent from `from pybnlearn import *`, from
+    the docs generated off __all__, and from anything else that trusts it.
+    """
+    public = {
+        name for name in dir(pybnlearn)
+        if not name.startswith("_")
+        and getattr(getattr(pybnlearn, name), "__module__", "")
+        .startswith("pybnlearn")
+    }
+    missing = public - set(pybnlearn.__all__)
+
+    assert not missing, (
+        "importable but not in __all__: " + ", ".join(sorted(missing)))
+
+
+def test_everything_exported_exists():
+    missing = [name for name in pybnlearn.__all__
+               if not hasattr(pybnlearn, name)]
+    assert not missing, "in __all__ but not importable: " + ", ".join(missing)
