@@ -26,6 +26,8 @@ _RESTRICT = {
     "iamb.fdr": constraint.iamb_fdr,
     "mmpc": constraint.mmpc,
     "si.hiton.pc": constraint.si_hiton_pc,
+    "hpc": constraint.hpc,
+
     "pc.stable": constraint.pc_stable,
     "chow.liu": graph.chow_liu,
     "aracne": graph.aracne,
@@ -116,11 +118,6 @@ def mmhc(data, whitelist=None, blacklist=None, restrict_args=None,
 
 def h2pc(data, whitelist=None, blacklist=None, restrict_args=None,
          maximize_args=None):
-    """Hybrid HPC: not available yet.
-
-    bnlearn's h2pc() restricts with hpc(), which is not ported.  rsmax2() with
-    another restrict algorithm is the nearest thing available.
-    """
-    raise NotImplementedError(
-        "h2pc() needs the hpc() algorithm, which is not ported yet; use "
-        "rsmax2() with restrict='si.hiton.pc' or restrict='mmpc' instead")
+    """Hybrid HPC: hpc to restrict, hc to maximize."""
+    return _hybrid(data, "hpc", "hc", whitelist, blacklist, restrict_args,
+                   maximize_args, "h2pc")

@@ -30,8 +30,8 @@ from ._core import (Tester, cpdag_arcs, neighbourhoods,
 from .structure import (BayesianNetwork, _check_complete, _data_type,
                         build_blacklist)
 
-__all__ = ["fast_iamb", "gs", "iamb", "iamb_fdr", "inter_iamb", "learn_mb",
-           "learn_nbr", "mmpc", "pc_stable", "si_hiton_pc"]
+__all__ = ["fast_iamb", "gs", "hpc", "iamb", "iamb_fdr", "inter_iamb",
+           "learn_mb", "learn_nbr", "mmpc", "pc_stable", "si_hiton_pc"]
 
 
 _DISCRETE_TESTS = {"mi", "mi-adf", "mi-sh", "x2", "x2-adf"}
@@ -203,16 +203,20 @@ def _fdr_thresholds(m):
 
 
 def _ia_fdr_markov_blanket(tester, target, nodes, alpha, whitelist, blacklist,
-                           max_sx):
+                           max_sx, start=()):
     """ia.fdr.markov.blanket(): add and remove nodes by false discovery rate
-    rather than by raw p-value."""
+    rather than by raw p-value.
+
+    `start` seeds the blanket with nodes that are already known to belong;
+    hpc() uses it to avoid repeating the low-order tests it has just run.
+    """
     candidates = [n for n in nodes if n != target]
     thresholds = _fdr_thresholds(len(candidates))
 
     whitelisted = [y for y in candidates
                    if _listed(whitelist, (target, y), either=True)]
 
-    mb = list(dict.fromkeys(whitelisted))
+    mb = list(dict.fromkeys(list(start) + whitelisted))
     culprit = []
     state = []
     last_added = last_removed = None
@@ -617,7 +621,7 @@ def _vstruct_detect_from_dsep(nodes, arcs, pairs, alpha):
 def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
                       test, alpha, max_sx, undirected,
                       markov_blankets=True, empty_dsep=True,
-                      skeleton_fn=None):
+                      skeleton_fn=None, structure_fn=None):
     _check_complete(data)
 
     if not isinstance(data, pd.DataFrame):
@@ -653,6 +657,23 @@ def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
                            alpha, max_sx, whitelist, blacklist, undirected,
                            dsep_pairs)
 
+        if structure_fn is not None:
+            # hpc does its own filtering, so there is no separate
+            # neighbourhood phase to run afterwards.
+            structure = {
+                node: structure_fn(tester, node, nodes, alpha, whitelist,
+                                   blacklist, max_sx)
+                for node in nodes
+            }
+            for node in nodes:
+                structure[node]["mb"] = _fake_markov_blanket(structure, node)
+
+            structure = recover_structure(structure, nodes,
+                                          markov_blankets=False)
+            return _orient(tester, data, structure, nodes, algorithm, test,
+                           alpha, max_sx, whitelist, blacklist, undirected,
+                           None)
+
         blankets = {
             node: blanket_fn(tester, node, nodes, alpha, whitelist, blacklist,
                              max_sx)
@@ -687,11 +708,17 @@ def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
 def _orient(tester, data, structure, nodes, algorithm, test, alpha, max_sx,
             whitelist, blacklist, undirected, dsep_pairs):
     """learn.arc.directions(): find the v-structures, apply them, then let
-    cpdag() propagate what follows."""
+    cpdag() propagate what follows.
+
+    An undirected result skips all of this: R returns the adjacencies as
+    they are, without even filtering by the blacklist.  That is not an
+    oversight -- a blacklist forbids an arc in one direction, and an
+    undirected graph has not claimed a direction to forbid.
+    """
     arcs = _sets2arcs(structure, nodes)
-    arcs = [a for a in arcs if not _listed(blacklist, a)]
 
     if not undirected:
+        arcs = [a for a in arcs if not _listed(blacklist, a)]
         if dsep_pairs is not None:
             vs = _vstruct_detect_from_dsep(nodes, arcs, dsep_pairs, alpha)
         else:
@@ -969,15 +996,21 @@ def learn_nbr(data, node, method="mmpc", whitelist=None, blacklist=None,
               test=None, alpha=0.05, max_sx=None):
     """The neighbours of one node: the nodes adjacent to it in the graph,
     which is its Markov blanket without the spouses."""
-    if method not in _NEIGHBOURHOODS:
+    if method not in set(_NEIGHBOURHOODS) | {"hpc"}:
         raise ValueError(
             f"{method!r} does not learn neighbourhoods; the ones that do are "
-            + ", ".join(sorted(_NEIGHBOURHOODS)))
+            + ", ".join(sorted(set(_NEIGHBOURHOODS) | {"hpc"})))
 
     def blanket(tester, target, nodes, alpha, whitelist, blacklist, max_sx):
-        # the forward phase proposes, and the backward phase disposes: a
-        # candidate stays only if no subset of the others separates it from
-        # the target.  Skipping it leaves in nodes that are two steps away.
+        if method == "hpc":
+            # hpc filters as it goes, so there is nothing left to do after it.
+            return _hpc_heuristic(tester, target, nodes, alpha, whitelist,
+                                  blacklist, max_sx)["nbr"]
+
+        # for the others the forward phase proposes and the backward phase
+        # disposes: a candidate stays only if no subset of the rest
+        # separates it from the target.  Skipping it leaves in nodes that
+        # are two steps away.
         found = _NEIGHBOURHOODS[method](tester, target, nodes, alpha,
                                         whitelist, blacklist, max_sx)
         return _neighbour(tester, target, {target: found}, alpha, whitelist,
@@ -1010,3 +1043,235 @@ def _learn_local(data, node, blanket_fn, whitelist, blacklist, test, alpha,
     with Tester(data, test) as tester:
         return blanket_fn(tester, node, nodes, alpha, whitelist, blacklist,
                           max_sx)
+
+
+# ---------------------------------------------------------------------------
+# hybrid parents and children, from R/hybrid-pc.R
+# ---------------------------------------------------------------------------
+
+def _hpc_de_pcs(tester, target, nodes, alpha, whitelist, blacklist):
+    """hybrid.pc.de.pcs(): a superset of the parents and children, found
+    with tests of order zero and one only.
+
+    Cheap tests first is the whole idea of HPC: everything expensive later
+    is done inside this superset rather than over all the nodes.  The
+    separating sets found here are kept, because the spouse search needs
+    them -- a node that separates the target from something is a candidate
+    for being a spouse.
+    """
+    whitelisted = [y for y in nodes
+                   if y != target and _listed(whitelist, (target, y),
+                                              either=True)]
+    blacklisted = [y for y in nodes
+                   if y != target and _listed(blacklist, (target, y),
+                                              both=True)]
+
+    to_check = [n for n in nodes
+                if n != target and n not in whitelisted
+                and n not in blacklisted]
+
+    association = tester.pvalues(to_check, target, [])
+    keep = [n for n in to_check if association[n] <= alpha]
+
+    # weakest association first, so the least convincing candidates face
+    # the exclusion tests before the strong ones are in the conditioning set.
+    keep.sort(key=lambda n: association[n], reverse=True)
+
+    # whitelisted nodes get a p-value of zero and go first, which puts them
+    # at the front of every conditioning set built below.
+    pvalues = {n: 0.0 for n in whitelisted}
+    pvalues.update({n: association[n] for n in keep})
+
+    dsep_set = {}
+    if len(keep) <= 1:
+        return pvalues, dsep_set
+
+    for node in keep:
+        if node not in pvalues:
+            continue
+
+        # strongest association first this time: the nodes most likely to
+        # separate the pair are tried before the rest.
+        against = [n for n in sorted(pvalues, key=lambda k: pvalues[k])
+                   if n != node]
+        if not against:
+            continue
+
+        result = tester.allsubs(target, node, sx=against, min=1, max=1,
+                                alpha=alpha)
+
+        if result["p.value"] > alpha:
+            del pvalues[node]
+            dsep_set[node] = list(result["dsep.set"])
+        else:
+            pvalues[node] = max(pvalues[node], result["max.p.value"])
+
+    return pvalues, dsep_set
+
+
+def _hpc_de_sps(tester, target, nodes, pc_superset, dsep_set, alpha, max_sx):
+    """hybrid.pc.de.sps(): a superset of the spouses.
+
+    A spouse is not associated with the target on its own -- that is what
+    makes it a spouse rather than a neighbour -- so it can only be found by
+    conditioning on the common child.  That is what the loop over `cpc`
+    does, and why this needs the separating sets from the previous phase.
+    """
+    superset = []
+
+    for cpc in pc_superset:
+        pvalues = {}
+
+        for y in nodes:
+            if y == target or y in pc_superset:
+                continue
+
+            dsep = dsep_set.get(y, [])
+            if cpc in dsep:
+                continue
+            if len(dsep) + 1 > max_sx:
+                continue
+
+            p = tester.pvalue(target, y, list(dsep) + [cpc])
+            if p <= alpha:
+                pvalues[y] = p
+
+        # weakest first again, for the same reason.
+        ordered = sorted(pvalues, key=lambda n: pvalues[n], reverse=True)
+        kept = dict.fromkeys(ordered)
+
+        for y in ordered:
+            sx = [n for n in kept if n != y]
+            if not sx:
+                continue
+
+            result = tester.allsubs(target, y, sx=sx, fixed=[cpc], min=1,
+                                    max=1, alpha=alpha)
+            if result["p.value"] > alpha:
+                del kept[y]
+
+        for y in kept:
+            if y not in superset:
+                superset.append(y)
+
+    return superset
+
+
+def _hpc_filter(tester, target, pc_superset, sp_superset, nodes, alpha,
+                whitelist, blacklist, max_sx):
+    """hybrid.pc.filter(): keep only the candidates that no subset of the
+    Markov blanket separates from the target."""
+    whitelisted = [y for y in nodes
+                   if y != target and _listed(whitelist, (target, y),
+                                              either=True)]
+    blacklisted = [y for y in nodes
+                   if y != target and _listed(blacklist, (target, y),
+                                              both=True)]
+
+    candidates = [n for n in pc_superset if n not in blacklisted]
+    for n in whitelisted:
+        if n not in candidates:
+            candidates.append(n)
+
+    blanket = list(dict.fromkeys(list(pc_superset) + list(sp_superset)
+                                 + whitelisted))
+    if not blanket:
+        return []
+
+    pc = []
+    for node in candidates:
+        if node in whitelisted:
+            continue
+        result = tester.allsubs(target, node,
+                                sx=[n for n in blanket if n != node],
+                                max=max_sx, alpha=alpha)
+        if result["p.value"] < alpha:
+            pc.append(node)
+
+    for node in whitelisted:
+        if node not in pc:
+            pc.append(node)
+
+    return pc
+
+
+def _hpc_nbr_search(tester, target, nodes, alpha, whitelist, blacklist,
+                    max_sx, start, looking_for=None):
+    """hybrid.pc.nbr.search(): a full blanket-then-filter pass, but over the
+    restricted node set the supersets define rather than over everything."""
+    mb = _ia_fdr_markov_blanket(tester, target, nodes, alpha, whitelist,
+                                blacklist, max_sx, start=start)
+
+    # not in the blanket, so it cannot be a neighbour either.
+    if looking_for is not None and looking_for not in mb:
+        return []
+
+    return _hpc_filter(tester, target, mb, [], nodes, alpha, whitelist,
+                       blacklist, max_sx)
+
+
+def _hpc_heuristic(tester, target, nodes, alpha, whitelist, blacklist,
+                   max_sx):
+    """hybrid.pc.heuristic(): the whole of HPC for one node.
+
+    Three passes.  Cheap tests find a superset of the neighbours and, from
+    the separating sets they produce, a superset of the spouses; the
+    expensive tests then run only inside that.  The last loop is HPC's "OR"
+    rule: a node the target rejected is kept anyway if it, looking back,
+    accepts the target -- which recovers neighbours that one node's tests
+    happened to miss.
+    """
+    pvalues, dsep_set = _hpc_de_pcs(tester, target, nodes, alpha, whitelist,
+                                    blacklist)
+    pc_superset = list(pvalues)
+
+    if len(pc_superset) < 2:
+        return {"nbr": pc_superset, "mb": []}
+
+    sp_superset = _hpc_de_sps(tester, target, nodes, pc_superset, dsep_set,
+                              alpha, max_sx)
+
+    # two candidates and no spouse leaves nothing for the expensive tests to
+    # rule out: the superset is the set.
+    if len(pc_superset) == 2 and not sp_superset:
+        return {"nbr": pc_superset, "mb": list(pc_superset)}
+
+    # the two strongest candidates would only be re-tested with the same
+    # low-order tests, so they seed the search instead.
+    start = sorted(pvalues, key=lambda n: pvalues[n])[:2]
+
+    restricted = [target] + list(pc_superset) + list(sp_superset)
+
+    pc = _hpc_nbr_search(tester, target, restricted, alpha, whitelist,
+                         blacklist, max_sx, start)
+
+    for node in pc_superset:
+        if node in pc:
+            continue
+
+        found = _hpc_nbr_search(tester, node, restricted, alpha, whitelist,
+                                blacklist, max_sx, start, looking_for=target)
+
+        if target in found:
+            pc.append(node)
+
+    return {"nbr": pc, "mb": list(pc_superset) + list(sp_superset)}
+
+
+def hpc(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
+        max_sx=None, undirected=True):
+    """Hybrid Parents and Children, as bnlearn's hpc().
+
+    A neighbourhood algorithm that spends its budget where it matters: two
+    cheap passes narrow the candidates down to a superset of the neighbours
+    and their spouses, and only then does it run the tests with large
+    conditioning sets, over that superset rather than over every variable.
+
+    Undirected by default, like the other neighbourhood algorithms and like
+    bnlearn: it learns which nodes are adjacent without saying which way the
+    arcs point.
+    """
+    return _constraint_learn(data, None, "hpc", whitelist, blacklist, test,
+                             alpha, max_sx, undirected,
+                             markov_blankets=False,
+                             structure_fn=_hpc_heuristic)

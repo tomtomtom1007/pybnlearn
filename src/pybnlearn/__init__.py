@@ -8,8 +8,8 @@ merely resembling them.  See NOTICE for attribution and licensing.
 from ._core import BNLearnError, ci_test
 from .bootstrap import CrossValidation, bn_cv, boot_strength
 from .classifiers import classify, naive_bayes, tree_bayes
-from .constraint import (fast_iamb, gs, iamb, iamb_fdr, inter_iamb, learn_mb,
-                         learn_nbr, mmpc, pc_stable, si_hiton_pc)
+from .constraint import (fast_iamb, gs, hpc, iamb, iamb_fdr, inter_iamb,
+                         learn_mb, learn_nbr, mmpc, pc_stable, si_hiton_pc)
 from .divergence import H, KL
 from .exact import Factor, query
 from .fit import (ConditionalGaussianNode, DiscreteNode, FittedNetwork,
@@ -50,7 +50,7 @@ __all__ = [
     # structure learning: score-based, constraint-based, hybrid, pairwise
     "hc", "tabu",
     "gs", "iamb", "iamb_fdr", "inter_iamb", "fast_iamb", "mmpc", "pc_stable",
-    "si_hiton_pc", "learn_mb", "learn_nbr",
+    "si_hiton_pc", "hpc", "learn_mb", "learn_nbr",
     "h2pc", "mmhc", "rsmax2",
     "aracne", "chow_liu",
     # classifiers

@@ -115,9 +115,9 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Conditional independence tests | `mi`, `mi-adf`, `mi-sh`, `x2`, `x2-adf` (discrete); `cor`, `zf`, `mi-g`, `mi-g-sh` (Gaussian) |
 | Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge`; `loglik-cg`, `aic-cg`, `bic-cg`, `ebic-cg` |
 | Structure learning (score-based) | `hc`, `tabu` — whitelists, blacklists, `maxp`, arbitrary starting networks |
-| Structure learning (constraint-based) | `pc_stable`, `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `fast_iamb`, `mmpc`, `si_hiton_pc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
+| Structure learning (constraint-based) | `pc_stable`, `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `fast_iamb`, `mmpc`, `si_hiton_pc`, `hpc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
 | Structure learning (local) | `learn_mb`, `learn_nbr` — one node's Markov blanket or neighbourhood, without the whole network |
-| Structure learning (hybrid) | `mmhc`, `rsmax2` — any ported restrict/maximize pair |
+| Structure learning (hybrid) | `mmhc`, `h2pc`, `rsmax2` — any ported restrict/maximize pair |
 | Structure learning (pairwise) | `chow_liu`, `aracne` |
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams`, `sid` |
@@ -140,11 +140,11 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Interchange formats | `read_bif`, `read_dsc`, `read_net`, `write_bif`, `write_dsc`, `write_net`, `write_dot` |
 | Utilities | `score`, `modelstring`, `identifiable`, `singular`, `whitelist`, `blacklist`, `ntests` |
 
-116 of bnlearn's 160 exported functions are covered.  Still to do: `hpc`
-(and `h2pc`, which needs it), `direct.lingam`, incomplete data (`impute`,
-`structural.em`), the causal-inference layer (`as.scm`, `intervention`,
-`counterfactual`, `twin`), `perturb` and so random restarts for `hc`,
-`bn.boot`, `count.graphs`, `bf.strength`, and non-uniform graph priors.
+117 of bnlearn's 160 exported functions are covered.  Still to do:
+`direct.lingam`, incomplete data (`impute`, `structural.em`), the
+causal-inference layer (`as.scm`, `intervention`, `counterfactual`, `twin`),
+`perturb` and so random restarts for `hc`, `bn.boot`, `count.graphs`,
+`bf.strength`, and non-uniform graph priors.
 Exact inference covers discrete and Gaussian networks, but not mixtures of
 the two.
 
@@ -154,7 +154,7 @@ check against.
 
 ## Verified against R
 
-`pytest` runs 3125 checks, 2959 of which compare directly against values produced
+`pytest` runs 3244 checks, 3069 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -168,6 +168,10 @@ by R 4.6.1 with bnlearn 5.2.1:
   undirected output, comparing the arc set including direction;
 * 64 hybrid runs across `mmhc` and `rsmax2`, covering every ported
   restrict/maximize pair and arguments passed through to each phase;
+* 110 `hpc` and `h2pc` runs across 7 data sets -- including 37-node `alarm`,
+  where the two superset stages earn their keep and an off-by-one in them
+  would be least visible -- 6 independence tests, conditioning-set limits
+  and constraints;
 * 63 tabu searches across 8 data sets, 9 scores, tabu list sizes from 1 to 30,
   constraints and parent limits — 13 of which R's tabu resolves differently
   from R's hc, so the tabu-specific paths are actually covered rather than
@@ -253,6 +257,7 @@ Rscript tools/gen_r_custom_fixtures.R
 Rscript tools/gen_r_foreign_fixtures.R
 Rscript tools/gen_r_analysis_fixtures.R
 Rscript tools/gen_r_local_fixtures.R     # also needs gRain
+Rscript tools/gen_r_hpc_fixtures.R
 ```
 
 ## Performance

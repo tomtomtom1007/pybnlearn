@@ -71,6 +71,10 @@ def test_matches_r(case, datasets):
     assert learned.modelstring() == case["modelstring"]
 
 
-def test_h2pc_says_what_is_missing(datasets):
-    with pytest.raises(NotImplementedError, match="hpc"):
-        pybnlearn.h2pc(datasets["learning.test"])
+def test_h2pc_works_now_that_hpc_is_ported(datasets):
+    """This used to assert that h2pc refused; hpc is ported, so it runs.
+    Its own parity cases live in test_hpc.py."""
+    learned = pybnlearn.h2pc(datasets["learning.test"])
+
+    assert learned.narcs > 0
+    assert pybnlearn.directed(learned)
