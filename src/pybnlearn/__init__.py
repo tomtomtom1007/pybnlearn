@@ -12,7 +12,7 @@ from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
 from .exact import Factor, query
 from .fit import (ConditionalGaussianNode, DiscreteNode, FittedNetwork,
-                  GaussianNode, fit, predict)
+                  GaussianNode, bn_net, custom_fit, fit, predict)
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
 from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
@@ -49,7 +49,7 @@ __all__ = [
     # testing and scoring
     "ci_test", "score",
     # parameter learning and prediction
-    "fit", "predict",
+    "fit", "custom_fit", "bn_net", "predict",
     # simulation and inference
     "cpdist", "cpquery", "query", "rbn", "set_seed",
     "gbn2mvnorm", "mvnorm2gbn",

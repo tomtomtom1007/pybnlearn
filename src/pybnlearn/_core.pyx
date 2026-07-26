@@ -1607,22 +1607,23 @@ cdef SEXP _real_matrix_with_dim(object values, object dims, object dimnames,
 cdef SEXP _fitted_sexp(object fitted) except? NULL:
     """Build the bn.fit object the C code expects.
 
-    It reads `parents` and then either `prob` (with its dim and dimnames) or
-    `coefficients` and `sd`, dispatching on the class of each node and of the
-    network as a whole.
+    The dispatch is per node rather than per network, because a conditional
+    Gaussian network is a mixture of all three node types and because a
+    hand-built network has no fitting method to dispatch on.  The network's
+    own class is then whatever its nodes add up to.
     """
-    cdef SEXP out, node, coefs
+    cdef SEXP out, node, coefs, dpar, gpar, sds
     cdef int i, j
 
     names = list(fitted.nodes)
-    discrete = fitted.method in ("mle", "bayes")
-
     out = Rf_allocVector(VECSXP, len(names))
+    kinds = set()
 
     for i, name in enumerate(names):
         entry = fitted[name]
 
-        if discrete:
+        if hasattr(entry, "probabilities"):
+            kinds.add("d")
             node = Rf_allocVector(VECSXP, 4)
             Rf_SET_VECTOR_ELT(node, 0, _str_vector([entry.node]))
             Rf_SET_VECTOR_ELT(node, 1, _str_vector(entry.parents))
@@ -1633,7 +1634,11 @@ cdef SEXP _fitted_sexp(object fitted) except? NULL:
             Rf_setAttrib(node, R_NamesSymbol,
                          _str_vector(["node", "parents", "children", "prob"]))
             Rf_setAttrib(node, R_ClassSymbol, Rf_mkString(b"bn.fit.dnode"))
+        elif hasattr(entry, "discrete_parents"):
+            kinds.add("cg")
+            node = _cgnode_sexp(entry)
         else:
+            kinds.add("g")
             node = Rf_allocVector(VECSXP, 5)
             Rf_SET_VECTOR_ELT(node, 0, _str_vector([entry.node]))
             Rf_SET_VECTOR_ELT(node, 1, _str_vector(entry.parents))
@@ -1654,10 +1659,75 @@ cdef SEXP _fitted_sexp(object fitted) except? NULL:
         Rf_SET_VECTOR_ELT(out, i, node)
 
     Rf_setAttrib(out, R_NamesSymbol, _str_vector(names))
-    Rf_setAttrib(out, R_ClassSymbol,
-                 Rf_mkString(b"bn.fit.dnet" if discrete else b"bn.fit.gnet"))
+    if kinds == {"d"}:
+        Rf_setAttrib(out, R_ClassSymbol, Rf_mkString(b"bn.fit.dnet"))
+    elif kinds <= {"g"}:
+        Rf_setAttrib(out, R_ClassSymbol, Rf_mkString(b"bn.fit.gnet"))
+    else:
+        Rf_setAttrib(out, R_ClassSymbol, Rf_mkString(b"bn.fit.cgnet"))
 
     return out
+
+
+cdef SEXP _cgnode_sexp(object entry) except? NULL:
+    """A conditional Gaussian node.
+
+    dparents and gparents are one-based indices *into the node's parents*,
+    not into the network's nodes; the C side looks the parents up by
+    position, so getting this wrong reads the wrong column of the data.
+    """
+    cdef SEXP node, coefs, dpar, gpar, sds, dim, dlevels
+    cdef int i, j, nrow, ncol
+
+    node = Rf_allocVector(VECSXP, 8)
+    Rf_SET_VECTOR_ELT(node, 0, _str_vector([entry.node]))
+    Rf_SET_VECTOR_ELT(node, 1, _str_vector(entry.parents))
+    Rf_SET_VECTOR_ELT(node, 2, _str_vector(entry.children))
+
+    position = {p: i for i, p in enumerate(entry.parents)}
+
+    dpar = Rf_allocVector(INTSXP, len(entry.discrete_parents))
+    for i, parent in enumerate(entry.discrete_parents):
+        INTEGER(dpar)[i] = position[parent] + 1
+    Rf_SET_VECTOR_ELT(node, 3, dpar)
+
+    gpar = Rf_allocVector(INTSXP, len(entry.continuous_parents))
+    for i, parent in enumerate(entry.continuous_parents):
+        INTEGER(gpar)[i] = position[parent] + 1
+    Rf_SET_VECTOR_ELT(node, 4, gpar)
+
+    dlevels = Rf_allocVector(VECSXP, len(entry.discrete_parents))
+    for i, parent in enumerate(entry.discrete_parents):
+        Rf_SET_VECTOR_ELT(dlevels, i,
+                          _str_vector(entry.discrete_levels[parent]))
+    Rf_setAttrib(dlevels, R_NamesSymbol,
+                 _str_vector(list(entry.discrete_parents)))
+    Rf_SET_VECTOR_ELT(node, 5, dlevels)
+
+    values = np.ascontiguousarray(
+        np.asarray(entry.coefficients, dtype=np.float64).ravel(order="F"))
+    nrow = entry.coefficients.shape[0]
+    ncol = entry.coefficients.shape[1]
+    coefs = Rf_allocVector(REALSXP, nrow * ncol)
+    for j in range(nrow * ncol):
+        REAL(coefs)[j] = values[j]
+    dim = Rf_allocVector(INTSXP, 2)
+    INTEGER(dim)[0] = nrow
+    INTEGER(dim)[1] = ncol
+    Rf_setAttrib(coefs, R_DimSymbol, dim)
+    Rf_SET_VECTOR_ELT(node, 6, coefs)
+
+    sd = np.asarray(entry.sd, dtype=np.float64).reshape(-1)
+    sds = Rf_allocVector(REALSXP, len(sd))
+    for i in range(len(sd)):
+        REAL(sds)[i] = sd[i]
+    Rf_SET_VECTOR_ELT(node, 7, sds)
+
+    Rf_setAttrib(node, R_NamesSymbol, _str_vector(
+        ["node", "parents", "children", "dparents", "gparents", "dlevels",
+         "coefficients", "sd"]))
+    Rf_setAttrib(node, R_ClassSymbol, Rf_mkString(b"bn.fit.cgnode"))
+    return node
 
 
 cdef object _read_column(SEXP x):

@@ -160,6 +160,37 @@ for (dname in names(fixed)) {
   }
 }
 
+# ---------------------------------------------------------------------------
+# sampling from a fitted conditional Gaussian network
+# ---------------------------------------------------------------------------
+
+# The three node types are sampled by three different bits of C, and a
+# cgnode's parameters reach it as indices into the node's parents rather
+# than by name -- so this is the check that those indices are right.
+for (dname in names(fixed)) {
+  d = sets[[dname]]
+  ms = fixed[[dname]][1]
+  fit = bn.fit(model2network(ms), d, method = "mle-cg")
+
+  for (seed in c(1, 42)) {
+    set.seed(seed)
+    generated = rbn(fit, n = 20)
+
+    columns = sapply(names(generated), function(v)
+      paste0(jstr(v), ":",
+             if (is.factor(generated[[v]])) jarr(as.character(generated[[v]]))
+             else num(generated[[v]])))
+
+    add(paste0(jstr("kind"), ":", jstr("rbn")),
+        paste0(jstr("dataset"), ":", jstr(dname)),
+        paste0(jstr("modelstring"), ":", jstr(ms)),
+        paste0(jstr("seed"), ":", sprintf("%d", seed)),
+        paste0(jstr("n"), ":", "20"),
+        paste0(jstr("columns"), ":",
+               paste0("{", paste(columns, collapse = ","), "}")))
+  }
+}
+
 writeLines(paste0("[\n", paste(records, collapse = ",\n"), "\n]"),
            file.path(outdir, "cg.json"))
 cat("wrote", length(records), "records to", file.path(outdir, "cg.json"), "\n")

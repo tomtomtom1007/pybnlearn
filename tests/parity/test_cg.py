@@ -184,6 +184,30 @@ def test_the_regressions_reproduce_the_fitted_values(datasets,
                        rtol=1e-10, atol=1e-12)
 
 
+@pytest.mark.parametrize("case", _records("rbn"),
+                         ids=lambda c: f"{c['dataset']}-seed{c['seed']}")
+def test_sampling_from_a_mixed_network_matches_r(case, datasets,
+                                                 fitted_networks):
+    """The three node types are sampled by three different pieces of C, and a
+    conditional Gaussian node's parameters reach it as positions among the
+    node's parents rather than by name -- so an off-by-one there would show
+    up here and nowhere in the parameter comparisons above."""
+    fit = fitted_networks(case["dataset"], case["modelstring"])
+
+    pybnlearn.set_seed(int(case["seed"]))
+    generated = pybnlearn.rbn(fit, int(case["n"]))
+
+    assert list(generated.columns) == list(case["columns"])
+
+    for name, expected in case["columns"].items():
+        got = generated[name]
+        if isinstance(expected[0], str):
+            assert list(got.astype(str)) == expected, name
+        else:
+            assert np.allclose(got.to_numpy(dtype=float), expected,
+                               rtol=1e-10, atol=1e-12), name
+
+
 def test_the_method_has_to_suit_the_data(datasets):
     with pytest.raises(ValueError, match="mixture"):
         pybnlearn.fit(pybnlearn.hc(datasets["learning.test"]),
