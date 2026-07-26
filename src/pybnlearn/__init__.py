@@ -6,7 +6,8 @@ merely resembling them.  See NOTICE for attribution and licensing.
 """
 
 from ._core import BNLearnError, ci_test
+from .structure import BayesianNetwork, hc, score
 
-__all__ = ["BNLearnError", "ci_test"]
+__all__ = ["BNLearnError", "BayesianNetwork", "ci_test", "hc", "score"]
 
 __version__ = "0.1.0.dev0"

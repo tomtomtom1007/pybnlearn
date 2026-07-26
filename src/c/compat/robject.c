@@ -490,6 +490,7 @@ SEXP Rf_coerceVector(SEXP x, SEXPTYPE type) {
 
 int n = Rf_length(x);
 SEXP out = NULL;
+char buf[64];
 
   if (x->sxptype == type)
     return x;
@@ -499,6 +500,38 @@ SEXP out = NULL;
   for (int i = 0; i < n; i++) {
 
     switch (type) {
+
+      case STRSXP:
+        /* as.character().  int2fac() relies on this to turn the integer codes
+         * it generates into factor levels, so it is on the hot path of every
+         * discrete score: the parent configurations are built as factors. */
+        switch (x->sxptype) {
+
+          case INTSXP:
+          case LGLSXP:
+            if (INTEGER(x)[i] == NA_INTEGER)
+              SET_STRING_ELT(out, i, NA_STRING);
+            else {
+              snprintf(buf, sizeof(buf), "%d", INTEGER(x)[i]);
+              SET_STRING_ELT(out, i, Rf_mkChar(buf));
+            }/*ELSE*/
+            break;
+
+          case REALSXP:
+            if (ISNAN(REAL(x)[i]))
+              SET_STRING_ELT(out, i, NA_STRING);
+            else {
+              /* R formats doubles with up to 15 significant digits. */
+              snprintf(buf, sizeof(buf), "%.15g", REAL(x)[i]);
+              SET_STRING_ELT(out, i, Rf_mkChar(buf));
+            }/*ELSE*/
+            break;
+
+          default:
+            Rf_error("unsupported coercion to a character vector.");
+
+        }/*SWITCH*/
+        break;
 
       case REALSXP:
         if (x->sxptype == INTSXP || x->sxptype == LGLSXP)

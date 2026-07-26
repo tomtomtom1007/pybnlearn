@@ -36,6 +36,15 @@ typedef SEXP (*fn11)(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP,
 typedef SEXP (*fn12)(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP,
     SEXP, SEXP, SEXP);
 
+typedef SEXP (*fn13)(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, 
+    SEXP, SEXP, SEXP, SEXP);
+typedef SEXP (*fn14)(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, 
+    SEXP, SEXP, SEXP, SEXP, SEXP);
+typedef SEXP (*fn15)(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, 
+    SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+typedef SEXP (*fn16)(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, 
+    SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+
 #define A(i) args[i]
 
 /* returns 0 and sets *out on success; returns 1 on error, with the message
@@ -67,8 +76,18 @@ int pybn_protected_call(void *fn, SEXP *args, int nargs, SEXP *out) {
     case 12: *out = ((fn12)fn)(A(0), A(1), A(2), A(3), A(4), A(5), A(6), A(7),
                A(8), A(9), A(10), A(11)); break;
 
+    case 13: *out = ((fn13)fn)(A(0), A(1), A(2), A(3), A(4), A(5), A(6), 
+               A(7), A(8), A(9), A(10), A(11), A(12)); break;
+    case 14: *out = ((fn14)fn)(A(0), A(1), A(2), A(3), A(4), A(5), A(6), 
+               A(7), A(8), A(9), A(10), A(11), A(12), A(13)); break;
+    case 15: *out = ((fn15)fn)(A(0), A(1), A(2), A(3), A(4), A(5), A(6), 
+               A(7), A(8), A(9), A(10), A(11), A(12), A(13), A(14)); break;
+    case 16: *out = ((fn16)fn)(A(0), A(1), A(2), A(3), A(4), A(5), A(6), 
+               A(7), A(8), A(9), A(10), A(11), A(12), A(13), A(14), 
+               A(15)); break;
+
     default:
-      Rf_error("entry points take between 1 and 12 arguments, got %d.", nargs);
+      Rf_error("entry points take between 1 and 16 arguments, got %d.", nargs);
 
   }/*SWITCH*/
 

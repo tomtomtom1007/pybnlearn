@@ -32,8 +32,11 @@ def _scalar(value):
 def datasets():
     return {
         # discrete networks are factors in R, so categorical here
+        # keep_default_na=False so that category labels which happen to look
+        # like missing-value markers ("None", "NA") survive the round trip.
         "learning.test": pd.read_csv(
-            FIXTURES / "learning.test.csv", dtype="category"),
+            FIXTURES / "learning.test.csv", dtype="category",
+            keep_default_na=False, na_values=[]),
         "gaussian.test": pd.read_csv(
             FIXTURES / "gaussian.test.csv", dtype="float64"),
     }

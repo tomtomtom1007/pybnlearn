@@ -18,6 +18,6 @@ py.extension_module(
 )
 
 py.install_sources(
-  ['__init__.py'],
+  ['__init__.py', 'structure.py'],
   subdir: 'pybnlearn',
 )
