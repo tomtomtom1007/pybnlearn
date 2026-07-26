@@ -22,23 +22,6 @@ import pybnlearn
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
 # The data sets whose columns are all numeric; everything else is categorical.
-CONTINUOUS = {"gaussian.test", "marks"}
-
-
-@pytest.fixture(scope="session")
-def datasets():
-    loaded = {}
-    for path in FIXTURES.glob("*.csv"):
-        name = path.stem
-        if name in CONTINUOUS:
-            loaded[name] = pd.read_csv(path, dtype="float64")
-        else:
-            # keep_default_na is essential: insurance has a category literally
-            # called "None", and pandas would otherwise read 14681 of its rows
-            # as missing, silently changing the level counts and the scores.
-            loaded[name] = pd.read_csv(path, dtype="category",
-                                       keep_default_na=False, na_values=[])
-    return loaded
 
 
 def _cases():

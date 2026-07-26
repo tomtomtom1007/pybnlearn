@@ -1440,3 +1440,91 @@ def consistent_extension(arcs, node_names):
         return _arcs_from_sexp(_guarded(<void *>pdag_extension, a, 3))
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# parameter learning
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP classic_discrete_parameters(SEXP data, SEXP node,
+    SEXP parents, SEXP iss, SEXP replace_unidentifiable, SEXP missing)
+cdef extern SEXP gaussian_ols_parameters(SEXP data, SEXP node, SEXP parents,
+    SEXP keep_fitted, SEXP replace_unidentifiable, SEXP missing)
+
+
+cdef object _read_table(SEXP x):
+    """A conditional probability table: values plus the dimensions and level
+    labels that say what each axis means.
+
+    R lays arrays out column-major, so the values come back in Fortran order
+    and the caller reshapes accordingly.
+    """
+    cdef SEXP dim = Rf_getAttrib(x, R_DimSymbol)
+    cdef SEXP dimnames = Rf_getAttrib(x, Rf_install(b"dimnames"))
+    cdef int n = Rf_length(x)
+    cdef int i
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] values = np.empty(n, np.float64)
+
+    for i in range(n):
+        values[i] = REAL(x)[i]
+
+    if dim == R_NilValue:
+        shape = (n,)
+    else:
+        shape = tuple(INTEGER(dim)[i] for i in range(Rf_length(dim)))
+
+    if dimnames == R_NilValue:
+        variables, levels = [], []
+    else:
+        variables = _names_of(dimnames) or [None] * Rf_length(dimnames)
+        levels = [_strings(Rf_VECTOR_ELT(dimnames, i))
+                  for i in range(Rf_length(dimnames))]
+
+    return {
+        "values": values.reshape(shape, order="F"),
+        "variables": variables,
+        "levels": levels,
+    }
+
+
+def discrete_parameters(data, node, parents, iss=None,
+                        bint replace_unidentifiable=False):
+    """classic_discrete_parameters(): the conditional probability table of one
+    node.  `iss` present selects the Bayesian estimator, absent the maximum
+    likelihood one."""
+    cdef SEXP a[6]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = _str_vector([str(node)])
+        a[2] = _str_vector([str(p) for p in (parents or [])])
+        a[3] = R_NilValue if iss is None else Rf_ScalarReal(float(iss))
+        a[4] = Rf_ScalarLogical(1 if replace_unidentifiable else 0)
+        a[5] = Rf_ScalarLogical(0)
+        return _read_table(
+            _guarded(<void *>classic_discrete_parameters, a, 6))
+    finally:
+        pybn_arena_pop()
+
+
+def gaussian_parameters(data, node, parents, bint keep_fitted=True,
+                        bint replace_unidentifiable=False):
+    """gaussian_ols_parameters(): the regression of one node on its parents."""
+    cdef SEXP a[6]
+    cdef SEXP out
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = _str_vector([str(node)])
+        a[2] = _str_vector([str(p) for p in (parents or [])])
+        a[3] = Rf_ScalarLogical(1 if keep_fitted else 0)
+        a[4] = Rf_ScalarLogical(1 if replace_unidentifiable else 0)
+        a[5] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>gaussian_ols_parameters, a, 6)
+        return _sexp_to_py(out)
+    finally:
+        pybn_arena_pop()

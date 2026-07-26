@@ -19,7 +19,6 @@ import pytest
 import pybnlearn
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
-CONTINUOUS = {"gaussian.test", "marks"}
 
 ALGORITHMS = {
     "gs": pybnlearn.gs,
@@ -32,17 +31,6 @@ ALGORITHMS = {
 }
 
 
-@pytest.fixture(scope="session")
-def datasets():
-    loaded = {}
-    for path in FIXTURES.glob("*.csv"):
-        name = path.stem
-        if name in CONTINUOUS:
-            loaded[name] = pd.read_csv(path, dtype="float64")
-        else:
-            loaded[name] = pd.read_csv(path, dtype="category",
-                                       keep_default_na=False, na_values=[])
-    return loaded
 
 
 def _cases():

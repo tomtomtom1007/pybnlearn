@@ -59,18 +59,33 @@ pybnlearn.gs(data, test="mi", alpha=0.05).arcs
 pybnlearn.iamb(data).arcs
 pybnlearn.inter_iamb(data, undirected=True).arcs
 
+# parameter learning
+fitted = pybnlearn.fit(net, data)
+fitted["B"].probabilities        # the conditional probability table
+fitted["B"].as_frame()           # ... in long format
+
 # constraints
 pybnlearn.hc(data, whitelist=[("A", "F")], blacklist=[("A", "B")], maxp=3)
 ```
 
-### A note on `pandas.read_csv` and categorical data
+### Two notes on `pandas.read_csv` and categorical data
 
-`read_csv` treats `NA`, `None`, `N/A` and similar strings as missing values by
-default. bnlearn's own `insurance` data set has a category literally called
-`"None"`, so the default reads 14681 of its rows as missing. Pass
-`keep_default_na=False, na_values=[]` when the labels are meant to be data.
-pybnlearn raises rather than letting missing values reach the C core, but it
-cannot tell that a category was lost before it ever saw the frame.
+**Missing values.** `read_csv` treats `NA`, `None`, `N/A` and similar strings
+as missing by default. bnlearn's own `insurance` data set has a category
+literally called `"None"`, so the default reads 14681 of its rows as missing.
+Pass `keep_default_na=False, na_values=[]` when the labels are meant to be
+data. pybnlearn raises rather than letting missing values reach the C core, but
+it cannot tell that a category was lost before it ever saw the frame.
+
+**Level order.** `read_csv` orders categories alphabetically. Most of the
+library does not care — mutual information and the network scores are invariant
+to it — but a conditional probability table is *indexed* by level, so `fit()`
+returns its axes in whatever order the categories are in. If the order matters
+to you, set it explicitly:
+
+```python
+data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"])
+```
 
 ## What works
 
@@ -84,18 +99,19 @@ cannot tell that a category was lost before it ever saw the frame.
 | Structure learning (pairwise) | `chow_liu`, `aracne` |
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams` |
+| Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones |
 | Utilities | `score`, `modelstring` |
 
 Not yet ported: the remaining constraint-based and hybrid algorithms
-(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), parameter learning
-(`bn.fit`), inference
+(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), conditional Gaussian
+parameter learning, inference
 (`cpquery`, `rbn`), cross-validation, bootstrap, classifiers, conditional
 Gaussian networks, incomplete data, non-uniform graph priors, and random
 restarts for `hc`.
 
 ## Verified against R
 
-`pytest` runs 816 checks, 785 of which compare directly against values produced
+`pytest` runs 874 checks, 840 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -113,6 +129,9 @@ by R 4.6.1 with bnlearn 5.2.1:
   constraints and parent limits — 13 of which R's tabu resolves differently
   from R's hc, so the tabu-specific paths are actually covered rather than
   incidentally agreeing with hill climbing;
+* 55 fitted networks, comparing every cell of every conditional probability
+  table and every regression coefficient, over three structures per data set
+  and both the maximum likelihood and Bayesian estimators;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -127,6 +146,8 @@ Rscript tools/gen_r_constraint_fixtures.R
 Rscript tools/gen_r_graph_fixtures.R
 Rscript tools/gen_r_tabu_fixtures.R
 Rscript tools/gen_r_hybrid_fixtures.R
+Rscript tools/gen_r_fit_fixtures.R
+Rscript tools/gen_r_levels.R
 ```
 
 ## Performance
