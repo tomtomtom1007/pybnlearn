@@ -115,12 +115,17 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Conditional independence tests | `mi`, `mi-adf`, `mi-sh`, `x2`, `x2-adf` (discrete); `cor`, `zf`, `mi-g`, `mi-g-sh` (Gaussian) |
 | Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge`; `loglik-cg`, `aic-cg`, `bic-cg`, `ebic-cg` |
 | Structure learning (score-based) | `hc`, `tabu` — whitelists, blacklists, `maxp`, arbitrary starting networks |
-| Structure learning (constraint-based) | `pc_stable`, `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `mmpc`, `si_hiton_pc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
+| Structure learning (constraint-based) | `pc_stable`, `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `fast_iamb`, `mmpc`, `si_hiton_pc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
+| Structure learning (local) | `learn_mb`, `learn_nbr` — one node's Markov blanket or neighbourhood, without the whole network |
 | Structure learning (hybrid) | `mmhc`, `rsmax2` — any ported restrict/maximize pair |
 | Structure learning (pairwise) | `chow_liu`, `aracne` |
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
-| Comparison | `shd`, `hamming`, `compare`, `nparams` |
-| Graph properties | `acyclic`, `directed`, `valid_dag`, `valid_cpdag`, `valid_ug`, `path_exists`, `connected_components`, `node_ordering` |
+| Comparison | `shd`, `hamming`, `compare`, `nparams`, `sid` |
+| Information | `H` (entropy), `KL` (divergence), `BF` (Bayes factor), `alpha_star` |
+| Graph properties | `acyclic`, `directed`, `valid_dag`, `valid_cpdag`, `valid_ug`, `path_exists`, `connected_components`, `node_ordering`, `dsep` |
+| Colliders and equivalence | `colliders`, `vstructs`, `shielded_colliders`, `unshielded_colliders`, `cextend` |
+| Generating graphs | `random_graph` (ordered, ic-dag, melancon), `complete_graph`, `empty_graph` |
+| Preprocessing | `discretize` (quantile, interval, Hartemink), `configs` |
 | Nodes and arcs | `parents`, `children`, `mb`, `nbr`, `spouses`, `ancestors`, `descendants`, `root_nodes`, `leaf_nodes`, `isolated_nodes`, `degree`, `in_degree`, `out_degree`, `arcs`, `narcs`, `nnodes`, `directed_arcs`, `undirected_arcs`, `incoming_arcs`, `outgoing_arcs`, `incident_arcs`, `compelled_arcs`, `reversible_arcs` |
 | Editing a graph | `set_arc`, `drop_arc`, `reverse_arc`, `set_edge`, `drop_edge`, `add_node`, `remove_node`, `rename_nodes` |
 | Constraints from orderings | `ordering2blacklist`, `tiers2blacklist`, `set2blacklist` |
@@ -133,21 +138,23 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Resampling | `boot_strength`, `bn_cv` — bootstrap arc strengths, k-fold / hold-out / custom-fold cross-validation, all six losses |
 | Arc strength | `arc_strength` (p-value or score difference), `custom_strength`, `averaged_network`, `inclusion_threshold` |
 | Interchange formats | `read_bif`, `read_dsc`, `read_net`, `write_bif`, `write_dsc`, `write_net`, `write_dot` |
-| Utilities | `score`, `modelstring` |
+| Utilities | `score`, `modelstring`, `identifiable`, `singular`, `whitelist`, `blacklist`, `ntests` |
 
-Not yet ported: the remaining constraint-based and hybrid algorithms
-(`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), `direct.lingam`,
-incomplete data (`impute`, `structural.em`), the causal-inference layer
-(`as.scm`, `intervention`, `counterfactual`), `dsep` and the v-structure
-utilities, `discretize`, `random.graph`, non-uniform graph priors, and
-random restarts for `hc`.  Exact inference covers discrete and Gaussian
-networks, but not mixtures of the two.  Plotting and the conversions to
-igraph and graphNEL are deliberately out of scope: they would be rewrites
-rather than ports, with nothing to check against.
+116 of bnlearn's 160 exported functions are covered.  Still to do: `hpc`
+(and `h2pc`, which needs it), `direct.lingam`, incomplete data (`impute`,
+`structural.em`), the causal-inference layer (`as.scm`, `intervention`,
+`counterfactual`, `twin`), `perturb` and so random restarts for `hc`,
+`bn.boot`, `count.graphs`, `bf.strength`, and non-uniform graph priors.
+Exact inference covers discrete and Gaussian networks, but not mixtures of
+the two.
+
+Plotting and the conversions to igraph, graphNEL and gRain are deliberately
+out of scope: they would be rewrites rather than ports, with nothing to
+check against.
 
 ## Verified against R
 
-`pytest` runs 2330 checks, 2190 of which compare directly against values produced
+`pytest` runs 3125 checks, 2959 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -209,6 +216,14 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 24 hand-built networks from `custom_fit`, compared as parameters and then
   sampled from and queried, since a network with an axis in the wrong place
   reads back correctly and samples from a different distribution;
+* 524 checks of d-separation, colliders, consistent extensions, structural
+  intervention distance, random graph generation and discretization --
+  d-separation enumerated over every pair of nodes in six graphs and three
+  kinds of conditioning set, and the generated graphs compared arc for arc
+  rather than statistically, since they come from R's own generator;
+* 245 checks of fast.iamb, local structure learning, entropy and
+  Kullback-Leibler divergence, the last two comparing pybnlearn's junction
+  tree against gRain's;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -236,6 +251,8 @@ Rscript tools/gen_r_strength_fixtures.R
 Rscript tools/gen_r_nodes_fixtures.R      # also needs igraph
 Rscript tools/gen_r_custom_fixtures.R
 Rscript tools/gen_r_foreign_fixtures.R
+Rscript tools/gen_r_analysis_fixtures.R
+Rscript tools/gen_r_local_fixtures.R     # also needs gRain
 ```
 
 ## Performance
