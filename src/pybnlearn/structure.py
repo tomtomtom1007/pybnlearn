@@ -39,6 +39,7 @@ _DISCRETE_SCORES = {
     "loglik", "aic", "bic", "ebic", "bde", "bds", "bdj", "k2", "fnml", "qnml",
 }
 _CONTINUOUS_SCORES = {"loglik-g", "aic-g", "bic-g", "ebic-g", "bge"}
+_MIXED_SCORES = {"loglik-cg", "aic-cg", "bic-cg", "ebic-cg"}
 
 # Which extra arguments each score accepts (score.extra.args in R/globals.R),
 # restricted to the scores implemented here.
@@ -53,6 +54,8 @@ _SCORE_ARGS = {
     "k2": (),
     "fnml": (), "qnml": (),
     "bge": ("prior", "beta", "nu", "iss.mu", "iss.w"),
+    "loglik-cg": (), "aic-cg": ("k",), "bic-cg": ("k",),
+    "ebic-cg": ("k", "gamma"),
 }
 
 
@@ -118,10 +121,26 @@ class BayesianNetwork:
 # argument checking, following R/sanitization-scores.R
 # ---------------------------------------------------------------------------
 
+def is_discrete_column(series):
+    """Whether a column reaches the C core as a factor.
+
+    This has to agree with what the conversion layer in _core.pyx actually
+    does, which is to treat anything that is not numeric -- categorical,
+    string, object, boolean -- as a factor.  Deciding it differently here
+    would send a discrete dataset to a continuous score.
+    """
+    if isinstance(series.dtype, pd.CategoricalDtype):
+        return True
+    if pd.api.types.is_bool_dtype(series):
+        return True
+    return not pd.api.types.is_numeric_dtype(series)
+
+
 def _data_type(data):
-    if all(isinstance(t, pd.CategoricalDtype) for t in data.dtypes):
+    discrete = [is_discrete_column(data[c]) for c in data.columns]
+    if all(discrete):
         return "discrete"
-    if all(pd.api.types.is_numeric_dtype(t) for t in data.dtypes):
+    if not any(discrete):
         return "continuous"
     return "mixed-cg"
 
@@ -183,6 +202,10 @@ def _check_score(score, data):
     if kind != "continuous" and score in _CONTINUOUS_SCORES:
         raise ValueError(
             f"score {score!r} may only be used with continuous data")
+    if kind != "mixed-cg" and score in _MIXED_SCORES:
+        raise ValueError(
+            f"score {score!r} may only be used with a mixture of discrete and "
+            "continuous data")
 
     return score
 

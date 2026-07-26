@@ -2016,3 +2016,98 @@ def predict_classifier(fitted, training, data, prior, bint prob=False):
         return _read_prediction(_guarded(<void *>naivepred, a, 6), prob)
     finally:
         pybn_arena_pop()
+
+
+cdef extern SEXP configurations(SEXP data, SEXP factor, SEXP all)
+cdef extern SEXP mixture_gaussian_ols_parameters(SEXP data, SEXP node,
+    SEXP parents, SEXP configs, SEXP keep_fitted,
+    SEXP replace_unidentifiable, SEXP missing)
+
+
+def parent_configurations(data):
+    """configurations(): one factor whose levels are the joint configurations
+    of the given discrete columns, in the order the C code expects them."""
+    cdef SEXP a[3]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = Rf_ScalarLogical(1)
+        a[2] = Rf_ScalarLogical(1)
+        return _read_column(_guarded(<void *>configurations, a, 3))
+    finally:
+        pybn_arena_pop()
+
+
+def conditional_gaussian_parameters(data, node, continuous_parents, configs,
+                                    bint keep_fitted=True,
+                                    bint replace_unidentifiable=False):
+    """mixture_gaussian_ols_parameters(): one regression per configuration of
+    the discrete parents."""
+    cdef SEXP a[7]
+    cdef SEXP out
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = _str_vector([str(node)])
+        a[2] = _str_vector([str(p) for p in (continuous_parents or [])])
+        configs = pd.Categorical(configs)
+        a[3] = _factor_column(np.asarray(configs.codes),
+                              list(configs.categories))
+        a[4] = Rf_ScalarLogical(1 if keep_fitted else 0)
+        a[5] = Rf_ScalarLogical(1 if replace_unidentifiable else 0)
+        a[6] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>mixture_gaussian_ols_parameters, a, 7)
+
+        names = _names_of(out) or []
+        result = {}
+        for i, name in enumerate(names):
+            entry = Rf_VECTOR_ELT(out, i)
+            if name == "coefficients":
+                # a matrix: one column of coefficients per configuration.
+                dim = Rf_getAttrib(entry, R_DimSymbol)
+                if dim != R_NilValue:
+                    result[name] = _read_real_matrix_2d(
+                        entry, INTEGER(dim)[0], INTEGER(dim)[1])
+                    result["coefnames"] = _dimnames_of(entry, 0)
+                    continue
+            elif name == "sd":
+                # named after the configurations; the names are dropped so
+                # that the standard deviations stay positional, like the
+                # columns of the coefficient matrix.
+                result[name] = _read_real_vector(entry)
+                continue
+            result[name] = _sexp_to_py(entry)
+        return result
+    finally:
+        pybn_arena_pop()
+
+
+cdef object _read_real_vector(SEXP x):
+    cdef int n = Rf_length(x)
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] out = np.empty(n, dtype=np.float64)
+    cdef int i
+    for i in range(n):
+        out[i] = REAL(x)[i]
+    return out
+
+
+cdef object _read_real_matrix_2d(SEXP x, int nrow, int ncol):
+    cdef cnp.ndarray[cnp.float64_t, ndim=2] out = np.empty(
+        (nrow, ncol), dtype=np.float64)
+    cdef int i, j
+    for j in range(ncol):
+        for i in range(nrow):
+            out[i, j] = REAL(x)[j * nrow + i]
+    return out
+
+
+cdef object _dimnames_of(SEXP x, int axis):
+    cdef SEXP dn = Rf_getAttrib(x, Rf_install(b"dimnames"))
+    if dn == R_NilValue:
+        return None
+    cdef SEXP entry = Rf_VECTOR_ELT(dn, axis)
+    return None if entry == R_NilValue else _strings(entry)

@@ -28,6 +28,10 @@ FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 # data sets whose columns are all numeric
 CONTINUOUS = {"gaussian.test", "marks"}
 
+# data sets that mix factors with numeric columns, where which is which has to
+# be inferred per column rather than declared for the whole frame
+MIXED = {"clgaussian.test", "cgsmall"}
+
 
 def _levels():
     path = FIXTURES / "levels.json"
@@ -46,8 +50,14 @@ def datasets():
             loaded[name] = pd.read_csv(path, dtype="float64")
             continue
 
-        frame = pd.read_csv(path, dtype="category",
-                            keep_default_na=False, na_values=[])
+        if name in MIXED:
+            frame = pd.read_csv(path, keep_default_na=False, na_values=[])
+            for column in frame.columns:
+                if not pd.api.types.is_numeric_dtype(frame[column]):
+                    frame[column] = frame[column].astype("category")
+        else:
+            frame = pd.read_csv(path, dtype="category",
+                                keep_default_na=False, na_values=[])
 
         for column, order in levels.get(name, {}).items():
             if column in frame.columns:

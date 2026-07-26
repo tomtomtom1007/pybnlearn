@@ -11,7 +11,8 @@ from .classifiers import classify, naive_bayes, tree_bayes
 from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
 from .exact import Factor, query
-from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit, predict
+from .fit import (ConditionalGaussianNode, DiscreteNode, FittedNetwork,
+                  GaussianNode, fit, predict)
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
 from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
@@ -21,7 +22,8 @@ from .structure import BayesianNetwork, hc, score, tabu
 
 __all__ = [
     # types
-    "BNLearnError", "BayesianNetwork", "CrossValidation", "DiscreteNode",
+    "BNLearnError", "BayesianNetwork", "ConditionalGaussianNode",
+    "CrossValidation", "DiscreteNode",
     "Factor", "FittedNetwork", "GaussianNode",
     # structure learning: score-based, constraint-based, hybrid, pairwise
     "hc", "tabu",

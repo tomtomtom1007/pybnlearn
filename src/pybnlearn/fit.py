@@ -13,12 +13,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ._core import (discrete_parameters, gaussian_parameters,
-                    predict_bayes_lw, predict_parents)
-from .structure import _check_complete, _data_type
+from ._core import (conditional_gaussian_parameters,
+                    discrete_parameters, gaussian_parameters,
+                    parent_configurations, predict_bayes_lw,
+                    predict_parents)
+from .structure import _check_complete, _data_type, is_discrete_column
 
-__all__ = ["DiscreteNode", "FittedNetwork", "GaussianNode", "fit",
-           "predict"]
+__all__ = ["ConditionalGaussianNode", "DiscreteNode", "FittedNetwork",
+           "GaussianNode", "fit", "predict"]
 
 
 class DiscreteNode:
@@ -62,6 +64,38 @@ class GaussianNode:
     def __repr__(self):
         return (f"GaussianNode({self.node!r}, parents={self.parents}, "
                 f"sd={self.sd:.6g})")
+
+
+class ConditionalGaussianNode:
+    """A continuous node with at least one discrete parent: one linear
+    regression on the continuous parents per configuration of the discrete
+    ones, each with its own residual standard deviation."""
+
+    def __init__(self, node, parents, children, discrete_parents,
+                 continuous_parents, levels, fitted):
+        self.node = node
+        self.parents = list(parents)
+        self.children = list(children)
+        self.discrete_parents = list(discrete_parents)
+        self.continuous_parents = list(continuous_parents)
+        self.discrete_levels = {k: list(v) for k, v in levels.items()}
+        # one column of coefficients per configuration of the discrete parents
+        self.coefficients = fitted["coefficients"]
+        self.coefficient_names = fitted.get("coefnames")
+        self.sd = np.atleast_1d(np.asarray(fitted["sd"], dtype=float))
+        self.configurations = fitted.get("configs")
+        self.residuals = fitted.get("residuals")
+        self.fitted_values = fitted.get("fitted.values")
+
+    @property
+    def nconfigurations(self):
+        return self.coefficients.shape[1]
+
+    def __repr__(self):
+        return (f"ConditionalGaussianNode({self.node!r}, "
+                f"discrete={self.discrete_parents}, "
+                f"continuous={self.continuous_parents}, "
+                f"{self.nconfigurations} regressions)")
 
 
 class FittedNetwork:
@@ -110,10 +144,15 @@ def _check_method(method, data):
     if method == "mle-g" and kind != "continuous":
         raise ValueError(
             f"method {method!r} may only be used with continuous data")
-    if method not in ("mle", "bayes", "mle-g"):
+    if method == "mle-cg" and kind != "mixed-cg":
+        raise ValueError(
+            f"method {method!r} may only be used with a mixture of discrete "
+            "and continuous data")
+    if method not in ("mle", "bayes", "mle-g", "mle-cg"):
         raise ValueError(
             f"method {method!r} is not implemented yet; available methods are "
-            "mle and bayes for discrete data, mle-g for continuous data")
+            "mle and bayes for discrete data, mle-g for continuous data, and "
+            "mle-cg for a mixture of the two")
 
     return method
 
@@ -183,9 +222,16 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
     # using the data's order would draw the random numbers in a different
     # sequence from R for any network whose nodes are ordered differently --
     # which model2network() guarantees, since it sorts them.
+    def _is_discrete(column):
+        return is_discrete_column(data[column])
+
     fitted = {}
     for node in network.nodes:
-        if method in ("mle", "bayes"):
+        if method == "mle-cg":
+            fitted[node] = _fit_mixed(data, node, parents[node],
+                                      children[node], _is_discrete,
+                                      keep_fitted, replace_unidentifiable)
+        elif method in ("mle", "bayes"):
             table = discrete_parameters(
                 data, node, parents[node],
                 iss=(float(iss) if method == "bayes" else None),
@@ -200,6 +246,47 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
                                         result)
 
     return FittedNetwork(fitted, method, network.learning)
+
+
+def _as_factor(series):
+    return (series if isinstance(series.dtype, pd.CategoricalDtype)
+            else series.astype("category"))
+
+
+def _fit_mixed(data, node, parents, children, is_discrete, keep_fitted,
+               replace_unidentifiable):
+    """bn.fit.backend.mixedcg(): pick the estimator the node's own type and
+    its parents' types call for.
+
+    A discrete node is discrete however its parents look; a continuous node
+    with only continuous parents is an ordinary regression; only a continuous
+    node with at least one discrete parent needs a regression per
+    configuration.
+    """
+    if is_discrete(node):
+        table = discrete_parameters(
+            data, node, parents, iss=None,
+            replace_unidentifiable=replace_unidentifiable)
+        return DiscreteNode(node, parents, children, table)
+
+    discrete_parents = [p for p in parents if is_discrete(p)]
+    continuous_parents = [p for p in parents if not is_discrete(p)]
+
+    if not discrete_parents:
+        result = gaussian_parameters(
+            data, node, parents, keep_fitted=keep_fitted,
+            replace_unidentifiable=replace_unidentifiable)
+        return GaussianNode(node, parents, children, result)
+
+    configs = parent_configurations(data[discrete_parents])
+    result = conditional_gaussian_parameters(
+        data, node, continuous_parents, configs, keep_fitted=keep_fitted,
+        replace_unidentifiable=replace_unidentifiable)
+
+    levels = {p: list(_as_factor(data[p]).cat.categories)
+              for p in discrete_parents}
+    return ConditionalGaussianNode(node, parents, children, discrete_parents,
+                                   continuous_parents, levels, result)
 
 
 def predict(fitted, node, data, method="parents", predictors=None, n=500,
