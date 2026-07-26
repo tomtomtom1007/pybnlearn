@@ -66,6 +66,7 @@ cdef extern from "rcompat.h":
     SEXP Rf_ScalarLogical(int x)
     SEXP Rf_getAttrib(SEXP x, SEXP name)
     SEXP Rf_setAttrib(SEXP x, SEXP name, SEXP value)
+    SEXP Rf_install(const char *name)
 
 
 cdef extern from "rcompat_internal.h":
@@ -831,3 +832,295 @@ def topological_order(node_names, arcs):
 
     # R's sort() is stable, so nodes at equal depth keep their original order.
     return [names[i] for i in np.argsort(values, kind="stable")]
+
+
+# ---------------------------------------------------------------------------
+# constraint-based structure learning
+#
+# These algorithms are driven from Python -- the grow/shrink loops are plain
+# control flow -- but every conditional independence test goes through the C
+# core, and there are a great many of them.  The data frame is therefore
+# converted once, into the arena this object owns, rather than per test.
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP allsubs_test(SEXP x, SEXP y, SEXP sx, SEXP fixed, SEXP data,
+    SEXP test, SEXP alpha, SEXP extra_args, SEXP min, SEXP max, SEXP complete,
+    SEXP debug)
+cdef extern SEXP bn_recovery(SEXP bn, SEXP mb, SEXP filter, SEXP debug)
+cdef extern SEXP roundrobin_test(SEXP x, SEXP z, SEXP fixed, SEXP data,
+    SEXP test, SEXP alpha, SEXP extra_args, SEXP complete, SEXP debug)
+cdef extern SEXP cpdag(SEXP arcs, SEXP nodes, SEXP moral, SEXP fix, SEXP wlbl,
+    SEXP whitelist, SEXP blacklist, SEXP illegal, SEXP debug)
+cdef extern SEXP amat2arcs(SEXP amat, SEXP nodes)
+cdef extern SEXP vstructures(SEXP bn, SEXP arcs, SEXP moral, SEXP debug)
+
+
+cdef object _arcs_from_sexp(SEXP x):
+    """A two-column character matrix comes back as 'from' then 'to'."""
+    cdef int n = Rf_length(x) // 2
+    cdef int i
+    return [(CHAR(Rf_STRING_ELT(x, i)).decode("utf-8"),
+             CHAR(Rf_STRING_ELT(x, i + n)).decode("utf-8"))
+            for i in range(n)]
+
+
+cdef class Tester:
+    """Repeated conditional independence tests over one data set."""
+
+    cdef SEXP data
+    cdef SEXP complete
+    cdef SEXP test
+    cdef SEXP extra
+    cdef SEXP nodes
+    cdef SEXP dsep_symbol
+    cdef bint live
+    cdef object node_names
+
+    def __cinit__(self):
+        self.live = False
+
+    def __init__(self, data, test, extra_args=None):
+        _ensure_init()
+        pybn_arena_push()
+        self.live = True
+
+        self.node_names = [str(c) for c in data.columns]
+        self.data = _dataframe(data)
+        self.nodes = _str_vector(self.node_names)
+        self.test = _py_to_sexp(str(test))
+        self.extra = _py_to_sexp(extra_args or {})
+        self.complete = _named_logical(self.node_names, True)
+        self.dsep_symbol = Rf_install(b"dsep.set")
+
+    def close(self):
+        if self.live:
+            pybn_arena_pop()
+            self.live = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+    def pvalue(self, x, y, sx=None):
+        """indep.test() in learning mode: just the p-value."""
+        cdef SEXP a[9]
+        cdef SEXP out
+        pybn_arena_push()
+        try:
+            a[0] = _str_vector([str(x)])
+            a[1] = _str_vector([str(y)])
+            a[2] = _str_vector([str(v) for v in sx]) if sx else R_NilValue
+            a[3] = self.data
+            a[4] = self.test
+            a[5] = Rf_ScalarReal(1.0)
+            a[6] = self.extra
+            a[7] = Rf_ScalarLogical(1)          # learning = TRUE
+            a[8] = self.complete
+            out = _guarded(<void *>indep_test, a, 9)
+            return REAL(out)[0]
+        finally:
+            pybn_arena_pop()
+
+    def pvalues(self, xs, y, sx=None):
+        """indep.test() with a vector of candidates: the p-value of each x
+        against y given sx.  The IAMB family picks the strongest association
+        from this in every forward step, so it is worth doing in one call."""
+        cdef SEXP a[9]
+        cdef SEXP out
+        cdef int i
+        xs = [str(v) for v in xs]
+        if not xs:
+            return {}
+        pybn_arena_push()
+        try:
+            a[0] = _str_vector(xs)
+            a[1] = _str_vector([str(y)])
+            a[2] = _str_vector([str(v) for v in sx]) if sx else R_NilValue
+            a[3] = self.data
+            a[4] = self.test
+            a[5] = Rf_ScalarReal(1.0)
+            a[6] = self.extra
+            a[7] = Rf_ScalarLogical(1)          # learning = TRUE
+            a[8] = self.complete
+            out = _guarded(<void *>indep_test, a, 9)
+            return {xs[i]: REAL(out)[i] for i in range(len(xs))}
+        finally:
+            pybn_arena_pop()
+
+    def roundrobin(self, x, z, fixed=None, double alpha=1.0):
+        """roundrobin.test(): test x against each element of z given the rest,
+        which is IAMB's backward phase."""
+        cdef SEXP a[9]
+        cdef SEXP out
+        z = [str(v) for v in (z or [])]
+        if not z:
+            return {}
+        pybn_arena_push()
+        try:
+            a[0] = _str_vector([str(x)])
+            a[1] = _str_vector(z)
+            a[2] = _str_vector([str(v) for v in (fixed or [])])
+            a[3] = self.data
+            a[4] = self.test
+            a[5] = Rf_ScalarReal(alpha)
+            a[6] = self.extra
+            a[7] = self.complete
+            a[8] = Rf_ScalarLogical(0)
+            out = _guarded(<void *>roundrobin_test, a, 9)
+            return _sexp_to_py(out)
+        finally:
+            pybn_arena_pop()
+
+    def allsubs(self, x, y, sx=None, fixed=None, double alpha=1.0,
+                int min=0, int max=-1):
+        """allsubs.test(): test x against y over every subset of sx, stopping
+        as soon as one of them separates them.
+
+        Returns the three p-values plus the separating set, which the
+        v-structure detection later needs.
+        """
+        cdef SEXP a[12]
+        cdef SEXP out, dsep
+        sx = [str(v) for v in (sx or [])]
+        fixed = [str(v) for v in (fixed or [])]
+        if max < 0:
+            max = len(sx)
+        max = min_int(max, len(sx))
+
+        pybn_arena_push()
+        try:
+            a[0] = _str_vector([str(x)])
+            a[1] = _str_vector([str(y)])
+            a[2] = _str_vector(fixed + sx)
+            a[3] = _str_vector(fixed) if fixed else _str_vector([])
+            a[4] = self.data
+            a[5] = self.test
+            a[6] = Rf_ScalarReal(alpha)
+            a[7] = self.extra
+            a[8] = Rf_ScalarInteger(min)
+            a[9] = Rf_ScalarInteger(max)
+            a[10] = self.complete
+            a[11] = Rf_ScalarLogical(0)
+            out = _guarded(<void *>allsubs_test, a, 12)
+
+            result = {
+                "p.value": REAL(out)[0],
+                "min.p.value": REAL(out)[1],
+                "max.p.value": REAL(out)[2],
+            }
+            dsep = Rf_getAttrib(out, self.dsep_symbol)
+            result["dsep.set"] = (
+                None if dsep == R_NilValue
+                else [CHAR(Rf_STRING_ELT(dsep, i)).decode("utf-8")
+                      for i in range(Rf_length(dsep))])
+            return result
+        finally:
+            pybn_arena_pop()
+
+
+cdef int min_int(int a, int b):
+    return a if a < b else b
+
+
+def recover_structure(structure, node_names, bint markov_blankets,
+                      filter="AND"):
+    """bn.recovery(): make the learned sets symmetric.
+
+    Independence tests are run separately for each node, so the results need
+    not agree -- x can end up in y's Markov blanket without y being in x's.
+    This is what reconciles them.
+    """
+    cdef SEXP a[4]
+    cdef SEXP bn, out
+    cdef int i
+
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        bn = Rf_allocVector(VECSXP, len(node_names))
+        for i, name in enumerate(node_names):
+            entry = structure[name]
+            if isinstance(entry, dict):
+                item = Rf_allocVector(VECSXP, 2)
+                Rf_SET_VECTOR_ELT(item, 0, _str_vector(entry.get("mb", [])))
+                Rf_SET_VECTOR_ELT(item, 1, _str_vector(entry.get("nbr", [])))
+                Rf_setAttrib(item, R_NamesSymbol, _str_vector(["mb", "nbr"]))
+                Rf_SET_VECTOR_ELT(bn, i, item)
+            else:
+                Rf_SET_VECTOR_ELT(bn, i, _str_vector(entry))
+        Rf_setAttrib(bn, R_NamesSymbol, _str_vector(node_names))
+
+        a[0] = bn
+        a[1] = Rf_ScalarLogical(1 if markov_blankets else 0)
+        a[2] = Rf_ScalarInteger(1 if filter == "OR" else 2)
+        a[3] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>bn_recovery, a, 4)
+
+        # Read this explicitly rather than through _sexp_to_py: that unwraps a
+        # length-one vector into a scalar, which would turn a one-node Markov
+        # blanket into a bare string.  Iterating it then yields characters, and
+        # for a variable named "M. Work" the caller sees "M".
+        return _read_node_sets(out, node_names, markov_blankets)
+    finally:
+        pybn_arena_pop()
+
+
+cdef object _strings(SEXP x):
+    cdef int i
+    if x == R_NilValue:
+        return []
+    return [CHAR(Rf_STRING_ELT(x, i)).decode("utf-8")
+            for i in range(Rf_length(x))]
+
+
+cdef object _read_node_sets(SEXP out, object node_names, bint flat):
+    """bn.recovery() returns either a plain character vector per node (Markov
+    blankets) or a two-element list of mb and nbr."""
+    cdef int i
+    cdef SEXP entry
+    result = {}
+    for i, name in enumerate(node_names):
+        entry = Rf_VECTOR_ELT(out, i)
+        if TYPEOF(entry) == VECSXP:
+            result[name] = {"mb": _strings(Rf_VECTOR_ELT(entry, 0)),
+                            "nbr": _strings(Rf_VECTOR_ELT(entry, 1))}
+        else:
+            result[name] = _strings(entry)
+    return result
+
+
+def cpdag_arcs(arcs, node_names, whitelist=None, blacklist=None,
+               illegal=None, bint moral=False, bint fix=False,
+               bint wlbl=False):
+    """cpdag(): propagate arc directions, and optionally complete the graph
+    into a DAG (`fix`)."""
+    cdef SEXP a[9]
+    cdef SEXP out, nodes
+
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        nodes = _str_vector(node_names)
+        a[0] = _arcs_sexp(arcs)
+        a[1] = nodes
+        a[2] = Rf_ScalarLogical(1 if moral else 0)
+        a[3] = Rf_ScalarLogical(1 if fix else 0)
+        a[4] = Rf_ScalarLogical(1 if wlbl else 0)
+        a[5] = _arcs_sexp(whitelist) if whitelist else R_NilValue
+        a[6] = _arcs_sexp(blacklist) if blacklist else R_NilValue
+        a[7] = _arcs_sexp(illegal) if illegal else R_NilValue
+        a[8] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>cpdag, a, 9)
+
+        a[0] = out
+        a[1] = nodes
+        return _arcs_from_sexp(_guarded(<void *>amat2arcs, a, 2))
+    finally:
+        pybn_arena_pop()

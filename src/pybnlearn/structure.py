@@ -146,6 +146,26 @@ def _check_complete(data):
               "they are meant to be category labels.")
 
 
+def build_blacklist(blacklist, whitelist):
+    """build.blacklist(): reconcile the two lists.
+
+    Whitelisting x -> y implicitly blacklists y -> x, unless that direction is
+    whitelisted too (which is how an undirected constraint is expressed).  This
+    is what actually pins a whitelisted arc's direction down: without it the
+    orientation phase has no reason to prefer one direction over the other, and
+    the arc comes back undirected.
+    """
+    whitelist = list(whitelist or ())
+    out = list(blacklist or ())
+
+    for a, b in whitelist:
+        if (b, a) not in whitelist and (b, a) not in out:
+            out.append((b, a))
+
+    # an arc cannot be both required and forbidden; the whitelist wins.
+    return [arc for arc in out if arc not in whitelist]
+
+
 def _check_score(score, data):
     kind = _data_type(data)
 
@@ -368,6 +388,10 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
                 raise ValueError(f"unknown node in arc ({a}, {b})")
             out[index[a], index[b]] = 1
         return out
+
+    # whitelisting an arc forbids its reverse, which is what stops the
+    # search from considering the other direction.
+    blacklist = build_blacklist(blacklist, whitelist)
 
     blmat = _amat_of(blacklist)
     wlmat = _amat_of(whitelist)

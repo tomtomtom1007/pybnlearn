@@ -3,9 +3,10 @@
 A Python port of [bnlearn](https://www.bnlearn.com/), Marco Scutari's R package
 for Bayesian network structure learning, parameter learning and inference.
 
-> **Status: early.** Conditional independence testing, network scoring and
-> hill-climbing structure learning work and are checked against R. Most of
-> bnlearn's API is not ported yet — see [What works](#what-works).
+> **Status: early.** Conditional independence testing, network scoring, and
+> both score-based and constraint-based structure learning work and are checked
+> against R. Much of bnlearn's API is not ported yet — see
+> [What works](#what-works).
 
 ## What makes this a port rather than a reimplementation
 
@@ -53,6 +54,11 @@ net.modelstring()          # '[A][C][F][B|A][D|A:C][E|B:F]'
 net.arcs                   # [('A', 'B'), ('A', 'D'), ...]
 pybnlearn.score(net, data) # -24006.734232498
 
+# constraint-based learning: these return a partially directed graph
+pybnlearn.gs(data, test="mi", alpha=0.05).arcs
+pybnlearn.iamb(data).arcs
+pybnlearn.inter_iamb(data, undirected=True).arcs
+
 # constraints
 pybnlearn.hc(data, whitelist=[("A", "F")], blacklist=[("A", "B")], maxp=3)
 ```
@@ -72,18 +78,21 @@ cannot tell that a category was lost before it ever saw the frame.
 |---|---|
 | Conditional independence tests | `mi`, `mi-adf`, `mi-sh`, `x2`, `x2-adf` (discrete); `cor`, `zf`, `mi-g`, `mi-g-sh` (Gaussian) |
 | Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge` |
-| Structure learning | `hc` — whitelists, blacklists, `maxp`, arbitrary starting networks |
+| Structure learning (score-based) | `hc` — whitelists, blacklists, `maxp`, arbitrary starting networks |
+| Structure learning (constraint-based) | `gs`, `iamb`, `inter_iamb` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
 | Utilities | `score`, `modelstring`, topological ordering |
 
-Not yet ported: the constraint-based and hybrid algorithms (`pc.stable`, `gs`,
-`iamb`, `mmpc`, `mmhc`, …), `tabu`, parameter learning (`bn.fit`), inference
+Not yet ported: the remaining constraint-based and hybrid algorithms
+(`pc.stable`, `fast.iamb`, `iamb.fdr`, `mmpc`, `si.hiton.pc`, `hpc`, `mmhc`,
+`rsmax2`, `h2pc`), `tabu`, `chow.liu`, `aracne`, parameter learning (`bn.fit`),
+inference
 (`cpquery`, `rbn`), cross-validation, bootstrap, classifiers, conditional
 Gaussian networks, incomplete data, non-uniform graph priors, and random
 restarts for `hc`.
 
 ## Verified against R
 
-`pytest` runs 413 checks, 401 of which compare directly against values produced
+`pytest` runs 506 checks, 494 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -91,6 +100,9 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 82 hill-climbing runs across 8 data sets, 13 scores, non-default
   hyperparameters, whitelists, blacklists and parent limits, each comparing the
   arc set, the model string and the per-node scores;
+* 93 constraint-based runs across `gs`, `iamb` and `inter_iamb`, 6 data sets,
+  7 independence tests, several significance levels, constraint sets and
+  undirected output, comparing the arc set including direction;
 * `set.seed(42)` reproduces R's uniform and normal streams to 15 digits.
 
 Regenerate the fixtures (needs R with bnlearn installed):
@@ -98,6 +110,7 @@ Regenerate the fixtures (needs R with bnlearn installed):
 ```bash
 Rscript tools/gen_r_fixtures.R
 Rscript tools/gen_r_hc_fixtures.R
+Rscript tools/gen_r_constraint_fixtures.R
 ```
 
 ## Performance
