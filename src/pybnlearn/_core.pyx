@@ -1124,3 +1124,134 @@ def cpdag_arcs(arcs, node_names, whitelist=None, blacklist=None,
         return _arcs_from_sexp(_guarded(<void *>amat2arcs, a, 2))
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# graph utilities and the pairwise (mutual-information) learners
+#
+# These are thin: the work is already done by entry points bnlearn exports, so
+# what is left is building the bn object they read and converting the arc set
+# they return.
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP dag2ug(SEXP bn, SEXP moral, SEXP debug)
+cdef extern SEXP shd(SEXP learned, SEXP golden, SEXP debug)
+cdef extern SEXP pdag2dag(SEXP arcs, SEXP nodes)
+cdef extern SEXP nparams_structure(SEXP graph, SEXP data, SEXP estimator,
+    SEXP debug)
+cdef extern SEXP chow_liu(SEXP data, SEXP nodes, SEXP estimator,
+    SEXP whitelist, SEXP blacklist, SEXP complete, SEXP conditional,
+    SEXP debug)
+cdef extern SEXP aracne(SEXP data, SEXP estimator, SEXP whitelist,
+    SEXP blacklist, SEXP complete, SEXP debug)
+
+
+def undirected_arcs(node_names, arcs, bint moral=False):
+    """dag2ug(): drop the directions, optionally moralising first."""
+    cdef SEXP a[3]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _bn_object(node_names, arcs)
+        a[1] = Rf_ScalarLogical(1 if moral else 0)
+        a[2] = Rf_ScalarLogical(0)
+        return _arcs_from_sexp(_guarded(<void *>dag2ug, a, 3))
+    finally:
+        pybn_arena_pop()
+
+
+def structural_hamming(node_names, learned_arcs, true_arcs):
+    """shd(): the count of arcs that differ between two graphs."""
+    cdef SEXP a[3]
+    cdef SEXP out
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _bn_object(node_names, learned_arcs)
+        a[1] = _bn_object(node_names, true_arcs)
+        a[2] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>shd, a, 3)
+        return int(REAL(out)[0]) if TYPEOF(out) == REALSXP else INTEGER(out)[0]
+    finally:
+        pybn_arena_pop()
+
+
+def extend_pdag(arcs, ordering):
+    """pdag2dag(): orient the remaining undirected arcs consistently with a
+    node ordering."""
+    cdef SEXP a[2]
+    ordering = [str(v) for v in ordering]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs)
+        a[1] = _str_vector(ordering)
+        return _arcs_from_sexp(_guarded(<void *>pdag2dag, a, 2))
+    finally:
+        pybn_arena_pop()
+
+
+def count_parameters(node_names, arcs, data, estimator="bic"):
+    """nparams(): the number of free parameters the network implies."""
+    cdef SEXP a[4]
+    cdef SEXP out
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _bn_object(node_names, arcs)
+        a[1] = _dataframe(data)
+        a[2] = _py_to_sexp(str(estimator))
+        a[3] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>nparams_structure, a, 4)
+        return float(REAL(out)[0]) if TYPEOF(out) == REALSXP \
+            else float(INTEGER(out)[0])
+    finally:
+        pybn_arena_pop()
+
+
+def chow_liu_arcs(data, node_names, estimator, whitelist=None, blacklist=None):
+    """chow.liu(): the maximum-weight spanning tree over mutual information."""
+    cdef SEXP a[8]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = _str_vector(node_names)
+        a[2] = _py_to_sexp(str(estimator))
+        a[3] = _arcs_sexp(whitelist) if whitelist else R_NilValue
+        a[4] = _arcs_sexp(blacklist) if blacklist else R_NilValue
+        a[5] = _named_logical(node_names, True)
+        a[6] = R_NilValue
+        a[7] = Rf_ScalarLogical(0)
+        return _arcs_from_sexp(_guarded(<void *>chow_liu, a, 8))
+    finally:
+        pybn_arena_pop()
+
+
+def aracne_arcs(data, estimator, whitelist=None, blacklist=None):
+    """aracne(): mutual information filtered by the data processing
+    inequality."""
+    cdef SEXP a[6]
+    node_names = [str(c) for c in data.columns]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = _py_to_sexp(str(estimator))
+        a[2] = _arcs_sexp(whitelist) if whitelist else R_NilValue
+        a[3] = _arcs_sexp(blacklist) if blacklist else R_NilValue
+        a[4] = _named_logical(node_names, True)
+        a[5] = Rf_ScalarLogical(0)
+        return _arcs_from_sexp(_guarded(<void *>aracne, a, 6))
+    finally:
+        pybn_arena_pop()

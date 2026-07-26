@@ -7,11 +7,20 @@ merely resembling them.  See NOTICE for attribution and licensing.
 
 from ._core import BNLearnError, ci_test
 from .constraint import gs, iamb, inter_iamb
+from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
+                    model2network, moral, nparams, pdag2dag, shd, skeleton,
+                    subgraph)
 from .structure import BayesianNetwork, hc, score
 
 __all__ = [
     "BNLearnError", "BayesianNetwork",
-    "ci_test", "gs", "hc", "iamb", "inter_iamb", "score",
+    # structure learning
+    "aracne", "chow_liu", "gs", "hc", "iamb", "inter_iamb",
+    # testing and scoring
+    "ci_test", "score",
+    # graphs
+    "compare", "cpdag", "empty_graph", "hamming", "model2network", "moral",
+    "nparams", "pdag2dag", "shd", "skeleton", "subgraph",
 ]
 
 __version__ = "0.1.0.dev0"

@@ -80,19 +80,21 @@ cannot tell that a category was lost before it ever saw the frame.
 | Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge` |
 | Structure learning (score-based) | `hc` — whitelists, blacklists, `maxp`, arbitrary starting networks |
 | Structure learning (constraint-based) | `gs`, `iamb`, `inter_iamb` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
-| Utilities | `score`, `modelstring`, topological ordering |
+| Structure learning (pairwise) | `chow_liu`, `aracne` |
+| Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
+| Comparison | `shd`, `hamming`, `compare`, `nparams` |
+| Utilities | `score`, `modelstring` |
 
 Not yet ported: the remaining constraint-based and hybrid algorithms
 (`pc.stable`, `fast.iamb`, `iamb.fdr`, `mmpc`, `si.hiton.pc`, `hpc`, `mmhc`,
-`rsmax2`, `h2pc`), `tabu`, `chow.liu`, `aracne`, parameter learning (`bn.fit`),
-inference
+`rsmax2`, `h2pc`), `tabu`, parameter learning (`bn.fit`), inference
 (`cpquery`, `rbn`), cross-validation, bootstrap, classifiers, conditional
 Gaussian networks, incomplete data, non-uniform graph priors, and random
 restarts for `hc`.
 
 ## Verified against R
 
-`pytest` runs 506 checks, 494 of which compare directly against values produced
+`pytest` runs 533 checks, 521 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -103,6 +105,9 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 93 constraint-based runs across `gs`, `iamb` and `inter_iamb`, 6 data sets,
   7 independence tests, several significance levels, constraint sets and
   undirected output, comparing the arc set including direction;
+* 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
+  learned networks, `shd`/`hamming`/`compare` over five network pairs,
+  `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
 * `set.seed(42)` reproduces R's uniform and normal streams to 15 digits.
 
 Regenerate the fixtures (needs R with bnlearn installed):
@@ -111,6 +116,7 @@ Regenerate the fixtures (needs R with bnlearn installed):
 Rscript tools/gen_r_fixtures.R
 Rscript tools/gen_r_hc_fixtures.R
 Rscript tools/gen_r_constraint_fixtures.R
+Rscript tools/gen_r_graph_fixtures.R
 ```
 
 ## Performance
