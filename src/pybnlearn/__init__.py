@@ -10,6 +10,7 @@ from .constraint import (gs, iamb, iamb_fdr, inter_iamb, mmpc, pc_stable,
                          si_hiton_pc)
 from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit
 from .hybrid import h2pc, mmhc, rsmax2
+from .inference import cpdist, cpquery, rbn, set_seed
 from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
                     model2network, moral, nparams, pdag2dag, shd, skeleton,
                     subgraph)
@@ -25,6 +26,8 @@ __all__ = [
     "ci_test", "score",
     # parameter learning
     "fit",
+    # simulation and inference
+    "cpdist", "cpquery", "rbn", "set_seed",
     # graphs
     "compare", "cpdag", "empty_graph", "hamming", "model2network", "moral",
     "nparams", "pdag2dag", "shd", "skeleton", "subgraph",

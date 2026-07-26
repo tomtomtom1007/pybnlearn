@@ -80,6 +80,7 @@ cdef extern from "rcompat_internal.h":
     void pybn_clear_warnings()
     const char *pybn_output_buffer()
     void pybn_clear_output()
+    void pybn_set_seed(unsigned int seed)
 
 
 cdef extern int pybn_protected_call(void *fn, SEXP *args, int nargs, SEXP *out)
@@ -1528,3 +1529,197 @@ def gaussian_parameters(data, node, parents, bint keep_fitted=True,
         return _sexp_to_py(out)
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# simulation and inference
+#
+# These take a fitted network rather than a structure, so they need the
+# bn.fit object built the way R's is: a named list of per-node lists, each
+# carrying the class the C dispatches on.
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP rbn_master(SEXP fitted, SEXP n, SEXP fix, SEXP add_metadata,
+    SEXP debug)
+cdef extern SEXP cpdist_lw(SEXP fitted, SEXP nodes, SEXP n, SEXP fix,
+    SEXP debug)
+cdef extern SEXP lw_weights(SEXP fitted, SEXP data, SEXP keep, SEXP debug)
+
+
+cdef SEXP _real_matrix_with_dim(object values, object dims, object dimnames,
+                                object varnames):
+    """A numeric array carrying dim and dimnames, which is how a conditional
+    probability table reaches the C code."""
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] flat = np.ascontiguousarray(
+        np.asarray(values, dtype=np.float64).ravel(order="F"))
+    cdef int n = flat.shape[0]
+    cdef SEXP out = Rf_allocVector(REALSXP, n)
+    cdef SEXP dim, dn
+    cdef int i
+
+    for i in range(n):
+        REAL(out)[i] = flat[i]
+
+    dim = Rf_allocVector(INTSXP, len(dims))
+    for i in range(len(dims)):
+        INTEGER(dim)[i] = dims[i]
+    Rf_setAttrib(out, R_DimSymbol, dim)
+
+    dn = Rf_allocVector(VECSXP, len(dimnames))
+    for i in range(len(dimnames)):
+        Rf_SET_VECTOR_ELT(dn, i, _str_vector(dimnames[i]))
+    Rf_setAttrib(dn, R_NamesSymbol, _str_vector(varnames))
+    Rf_setAttrib(out, Rf_install(b"dimnames"), dn)
+
+    Rf_setAttrib(out, R_ClassSymbol, Rf_mkString(b"table"))
+
+    return out
+
+
+cdef SEXP _fitted_sexp(object fitted) except? NULL:
+    """Build the bn.fit object the C code expects.
+
+    It reads `parents` and then either `prob` (with its dim and dimnames) or
+    `coefficients` and `sd`, dispatching on the class of each node and of the
+    network as a whole.
+    """
+    cdef SEXP out, node, coefs
+    cdef int i, j
+
+    names = list(fitted.nodes)
+    discrete = fitted.method in ("mle", "bayes")
+
+    out = Rf_allocVector(VECSXP, len(names))
+
+    for i, name in enumerate(names):
+        entry = fitted[name]
+
+        if discrete:
+            node = Rf_allocVector(VECSXP, 4)
+            Rf_SET_VECTOR_ELT(node, 0, _str_vector([entry.node]))
+            Rf_SET_VECTOR_ELT(node, 1, _str_vector(entry.parents))
+            Rf_SET_VECTOR_ELT(node, 2, _str_vector(entry.children))
+            Rf_SET_VECTOR_ELT(node, 3, _real_matrix_with_dim(
+                entry.probabilities, list(entry.probabilities.shape),
+                entry.levels, entry.variables))
+            Rf_setAttrib(node, R_NamesSymbol,
+                         _str_vector(["node", "parents", "children", "prob"]))
+            Rf_setAttrib(node, R_ClassSymbol, Rf_mkString(b"bn.fit.dnode"))
+        else:
+            node = Rf_allocVector(VECSXP, 5)
+            Rf_SET_VECTOR_ELT(node, 0, _str_vector([entry.node]))
+            Rf_SET_VECTOR_ELT(node, 1, _str_vector(entry.parents))
+            Rf_SET_VECTOR_ELT(node, 2, _str_vector(entry.children))
+
+            keys = list(entry.coefficients)
+            coefs = Rf_allocVector(REALSXP, len(keys))
+            for j, key in enumerate(keys):
+                REAL(coefs)[j] = float(entry.coefficients[key])
+            Rf_setAttrib(coefs, R_NamesSymbol, _str_vector(keys))
+
+            Rf_SET_VECTOR_ELT(node, 3, coefs)
+            Rf_SET_VECTOR_ELT(node, 4, Rf_ScalarReal(entry.sd))
+            Rf_setAttrib(node, R_NamesSymbol, _str_vector(
+                ["node", "parents", "children", "coefficients", "sd"]))
+            Rf_setAttrib(node, R_ClassSymbol, Rf_mkString(b"bn.fit.gnode"))
+
+        Rf_SET_VECTOR_ELT(out, i, node)
+
+    Rf_setAttrib(out, R_NamesSymbol, _str_vector(names))
+    Rf_setAttrib(out, R_ClassSymbol,
+                 Rf_mkString(b"bn.fit.dnet" if discrete else b"bn.fit.gnet"))
+
+    return out
+
+
+cdef object _read_column(SEXP x):
+    """One column of a generated data frame.
+
+    Read explicitly rather than through _sexp_to_py: that unwraps a
+    length-one vector into a scalar, which turns a single generated
+    observation into a bare float and breaks the DataFrame that is built from
+    it.  A column is always a sequence, whatever its length.
+    """
+    cdef int n = Rf_length(x)
+    cdef int i
+    cdef SEXP levels
+    cdef cnp.ndarray arr
+
+    if TYPEOF(x) == REALSXP:
+        arr = np.empty(n, dtype=np.float64)
+        for i in range(n):
+            arr[i] = REAL(x)[i]
+        return arr
+
+    if TYPEOF(x) == INTSXP:
+        levels = Rf_getAttrib(x, R_LevelsSymbol)
+        arr = np.empty(n, dtype=np.int64)
+        for i in range(n):
+            arr[i] = -1 if INTEGER(x)[i] == NA_INTEGER else INTEGER(x)[i] - 1
+        if levels != R_NilValue:
+            return pd.Categorical.from_codes(arr, categories=_strings(levels))
+        return arr + 1
+
+    if TYPEOF(x) == STRSXP:
+        return _strings(x)
+
+    raise TypeError(f"cannot read a data frame column of type {TYPEOF(x)}")
+
+
+cdef object _dataframe_to_py(SEXP df):
+    """A generated data frame comes back as a list of columns."""
+    cdef int i
+    names = _names_of(df) or []
+    return {name: _read_column(Rf_VECTOR_ELT(df, i))
+            for i, name in enumerate(names)}
+
+
+def random_sample(fitted, int n, fix=None):
+    """rbn(): draw n observations from a fitted network.
+
+    `fix` pins nodes to given values, which is what likelihood weighting does
+    to the evidence nodes.
+    """
+    cdef SEXP a[5]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _fitted_sexp(fitted)
+        a[1] = Rf_ScalarInteger(n)
+        a[2] = _py_to_sexp(fix) if fix else Rf_ScalarLogical(1)
+        a[3] = Rf_ScalarLogical(0)
+        a[4] = Rf_ScalarLogical(0)
+        return _dataframe_to_py(_guarded(<void *>rbn_master, a, 5))
+    finally:
+        pybn_arena_pop()
+
+
+def weighted_sample(fitted, nodes, int n, fix=None):
+    """cpdist_lw(): draw n observations with the evidence nodes pinned, and
+    return them together with the likelihood weights."""
+    cdef SEXP a[5]
+    cdef SEXP out
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _fitted_sexp(fitted)
+        a[1] = _str_vector([str(v) for v in nodes])
+        a[2] = Rf_ScalarInteger(n)
+        a[3] = _py_to_sexp(fix) if fix else Rf_ScalarLogical(1)
+        a[4] = Rf_ScalarLogical(0)
+        out = _guarded(<void *>cpdist_lw, a, 5)
+
+        weights = Rf_getAttrib(out, Rf_install(b"weights"))
+        return (_dataframe_to_py(out),
+                None if weights == R_NilValue
+                else _read_real(weights, Rf_length(weights)))
+    finally:
+        pybn_arena_pop()
+
+
+def set_seed(unsigned int seed):
+    """Seed the generator, reproducing R's set.seed() exactly."""
+    _ensure_init()
+    pybn_set_seed(seed)

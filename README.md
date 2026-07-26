@@ -64,6 +64,11 @@ fitted = pybnlearn.fit(net, data)
 fitted["B"].probabilities        # the conditional probability table
 fitted["B"].as_frame()           # ... in long format
 
+# inference: seeded runs reproduce R's set.seed() exactly
+pybnlearn.set_seed(1)
+pybnlearn.cpquery(fitted, {"B": "a"}, {"A": "a"}, method="ls", n=10000)
+pybnlearn.rbn(fitted, 100)       # sample from the network
+
 # constraints
 pybnlearn.hc(data, whitelist=[("A", "F")], blacklist=[("A", "B")], maxp=3)
 ```
@@ -100,18 +105,18 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams` |
 | Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones |
+| Simulation and inference | `rbn`, `cpquery`, `cpdist` — logic sampling and likelihood weighting; `set_seed` reproduces R's `set.seed` |
 | Utilities | `score`, `modelstring` |
 
 Not yet ported: the remaining constraint-based and hybrid algorithms
 (`fast.iamb`, `hpc`, and `h2pc`, which needs `hpc`), conditional Gaussian
-parameter learning, inference
-(`cpquery`, `rbn`), cross-validation, bootstrap, classifiers, conditional
-Gaussian networks, incomplete data, non-uniform graph priors, and random
-restarts for `hc`.
+parameter learning, exact inference
+cross-validation, bootstrap, classifiers, conditional Gaussian networks,
+incomplete data, non-uniform graph priors, and random restarts for `hc`.
 
 ## Verified against R
 
-`pytest` runs 874 checks, 840 of which compare directly against values produced
+`pytest` runs 941 checks, 901 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -132,6 +137,10 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 55 fitted networks, comparing every cell of every conditional probability
   table and every regression coefficient, over three structures per data set
   and both the maximum likelihood and Bayesian estimators;
+* 61 seeded simulation and inference results -- generated data compared
+  observation by observation, and conditional probabilities compared exactly
+  rather than statistically, since both implementations draw the same numbers
+  in the same order from R's Mersenne-Twister;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -148,6 +157,7 @@ Rscript tools/gen_r_tabu_fixtures.R
 Rscript tools/gen_r_hybrid_fixtures.R
 Rscript tools/gen_r_fit_fixtures.R
 Rscript tools/gen_r_levels.R
+Rscript tools/gen_r_inference_fixtures.R
 ```
 
 ## Performance

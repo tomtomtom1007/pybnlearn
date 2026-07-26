@@ -173,8 +173,13 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
         parents[node].sort(key=rank.__getitem__)
         children[node].sort(key=rank.__getitem__)
 
+    # Iterate in the network's node order, not the data's: that order becomes
+    # the order of the fitted network, and rbn() samples the nodes in it, so
+    # using the data's order would draw the random numbers in a different
+    # sequence from R for any network whose nodes are ordered differently --
+    # which model2network() guarantees, since it sorts them.
     fitted = {}
-    for node in nodes:
+    for node in network.nodes:
         if method in ("mle", "bayes"):
             table = discrete_parameters(
                 data, node, parents[node],
