@@ -93,8 +93,8 @@ def boot_strength(data, algorithm="hc", replicates=200, m=None,
 
     nodes = [str(c) for c in data.columns]
     learn = _ALGORITHMS[algorithm]
-    counts = np.zeros((ncol, ncol), dtype=np.float64)
 
+    learned = []
     for _ in range(replicates):
         # The two draws happen in this order in R, and each consumes the
         # generator, so swapping them would desynchronise every later
@@ -104,14 +104,43 @@ def boot_strength(data, algorithm="hc", replicates=200, m=None,
                    else np.arange(1, ncol + 1, dtype=np.int32))
 
         replicate = data.iloc[rows - 1, columns - 1]
+        learned.append(learn(replicate, **(algorithm_args or {})))
 
-        net = learn(replicate, **(algorithm_args or {}))
-        if cpdag:
-            net = graph.cpdag(net, wlbl=True)
+    result = _count_networks(learned, nodes, cpdag=cpdag)
 
-        counts = arc_strength_counters(counts, net.arcs, nodes)
+    from .strength import inclusion_threshold
 
-    counts /= replicates
+    result.attrs.update(nodes=nodes, method="bootstrap",
+                        threshold=inclusion_threshold(result))
+    return result
+
+
+def _count_networks(networks, nodes, weights=None, cpdag=True):
+    """arc.strength.custom(): how often each arc appears, and which way round.
+
+    An undirected arc counts half in each direction, so that adding the
+    strength and the direction back together gives one appearance rather
+    than two -- which is why this cannot be done with a plain tally.
+
+    The networks are passed in whole rather than as arc sets because
+    cpdag(wlbl = True) consults what they were learned under: an arc a
+    constraint-based run was told to leave alone must not be re-oriented
+    here.  Reducing them to arcs first silently changed the answer for gs
+    and iamb.
+    """
+    if weights is None:
+        weights = np.ones(len(networks))
+    weights = np.asarray(weights, dtype=float)
+
+    counts = np.zeros((len(nodes), len(nodes)), dtype=np.float64)
+
+    for network, weight in zip(networks, weights):
+        if not isinstance(network, BayesianNetwork):
+            network = BayesianNetwork(nodes, network)
+        arcs = graph.cpdag(network, wlbl=True).arcs if cpdag else network.arcs
+        counts = arc_strength_counters(counts, arcs, nodes, weight=weight)
+
+    counts /= weights.sum()
 
     result = arc_strength_coefficients(counts, nodes)
     return pd.DataFrame({

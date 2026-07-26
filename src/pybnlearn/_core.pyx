@@ -2111,3 +2111,62 @@ cdef object _dimnames_of(SEXP x, int axis):
         return None
     cdef SEXP entry = Rf_VECTOR_ELT(dn, axis)
     return None if entry == R_NilValue else _strings(entry)
+
+
+# ---------------------------------------------------------------------------
+# network averaging
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP smart_network_averaging(SEXP arcs, SEXP nodes, SEXP weights)
+cdef extern SEXP which_undirected(SEXP arcs, SEXP nodes)
+
+
+def which_arcs_undirected(arcs, node_names):
+    """which_undirected(): which of the given arcs also appear reversed.
+
+    Not to be confused with undirected_arcs() above, which drops directions;
+    this one only reports.
+    """
+    cdef SEXP a[2]
+
+    if not arcs:
+        return np.zeros(0, dtype=bool)
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs)
+        a[1] = _str_vector([str(v) for v in node_names])
+        return np.asarray(_sexp_to_py(_guarded(<void *>which_undirected, a, 2)),
+                          dtype=bool).reshape(-1)
+    finally:
+        pybn_arena_pop()
+
+
+def averaged_arcs(arcs, node_names, weights):
+    """smart_network_averaging(): keep the arcs, strongest first, that do not
+    close a cycle.
+
+    Order matters and is not the caller's: the C code sorts by weight and
+    walks the arcs in reverse, so an arc is dropped only when every stronger
+    arc already committed to would make it a cycle.
+    """
+    cdef SEXP a[3]
+    cdef SEXP w
+    cdef int i
+
+    weights = np.asarray(weights, dtype=np.float64)
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs)
+        a[1] = _str_vector([str(v) for v in node_names])
+        w = Rf_allocVector(REALSXP, len(weights))
+        for i in range(len(weights)):
+            REAL(w)[i] = weights[i]
+        a[2] = w
+        return _arcs_from_sexp(
+            _guarded(<void *>smart_network_averaging, a, 3))
+    finally:
+        pybn_arena_pop()

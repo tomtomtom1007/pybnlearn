@@ -19,6 +19,8 @@ from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
 from .graph import (aracne, chow_liu, compare, cpdag, empty_graph, hamming,
                     model2network, moral, nparams, pdag2dag, shd, skeleton,
                     subgraph)
+from .strength import (arc_strength, averaged_network,
+                       custom_strength, inclusion_threshold)
 from .structure import BayesianNetwork, hc, score, tabu
 
 __all__ = [
@@ -41,8 +43,9 @@ __all__ = [
     # simulation and inference
     "cpdist", "cpquery", "query", "rbn", "set_seed",
     "gbn2mvnorm", "mvnorm2gbn",
-    # resampling
-    "bn_cv", "boot_strength",
+    # resampling and arc strength
+    "bn_cv", "boot_strength", "arc_strength", "custom_strength",
+    "averaged_network", "inclusion_threshold",
     # graphs and comparison
     "compare", "cpdag", "empty_graph", "hamming", "model2network", "moral",
     "nparams", "pdag2dag", "shd", "skeleton", "subgraph",
