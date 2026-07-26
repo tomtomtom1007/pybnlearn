@@ -54,7 +54,10 @@ run = function(dataset, algorithm, test, alpha = 0.05, wl = NULL, bl = NULL,
     jarcs(net$arcs), jarr(names(net$nodes))))
 }
 
-algorithms = c("gs", "iamb", "inter.iamb")
+# mmpc and si.hiton.pc default to undirected = TRUE upstream, but every case
+# here passes `undirected` explicitly so the fixtures cover both modes for all
+# of them and do not silently depend on a default.
+algorithms = c("gs", "iamb", "inter.iamb", "iamb.fdr", "mmpc", "si.hiton.pc")
 discrete = c("learning.test", "asia", "coronary", "lizards")
 continuous = c("gaussian.test", "marks")
 
@@ -74,7 +77,8 @@ for (algo in algorithms)
 
 # undirected output skips the orientation phase entirely.
 for (algo in algorithms)
-  run("learning.test", algo, "mi", undirected = TRUE)
+  for (ds in c("learning.test", "asia", "coronary"))
+    run(ds, algo, "mi", undirected = TRUE)
 
 # constraints.
 wl = data.frame(from = "A", to = "F", stringsAsFactors = FALSE)

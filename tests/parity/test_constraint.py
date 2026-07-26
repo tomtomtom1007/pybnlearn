@@ -25,6 +25,9 @@ ALGORITHMS = {
     "gs": pybnlearn.gs,
     "iamb": pybnlearn.iamb,
     "inter.iamb": pybnlearn.inter_iamb,
+    "iamb.fdr": pybnlearn.iamb_fdr,
+    "mmpc": pybnlearn.mmpc,
+    "si.hiton.pc": pybnlearn.si_hiton_pc,
 }
 
 

@@ -145,3 +145,44 @@ def test_tabu_memory_is_flat_across_runs(discrete):
         pybnlearn.tabu(discrete, tabu=10)
 
     assert rss_mb() - baseline < 50, "memory grew across repeated searches"
+
+
+def _is_undirected(net):
+    return all((b, a) in net.arcs for a, b in net.arcs)
+
+
+@pytest.mark.parametrize("algorithm,expected", [
+    ("mmpc", True), ("si_hiton_pc", True),
+    ("gs", False), ("iamb", False), ("inter_iamb", False),
+    ("iamb_fdr", False),
+])
+def test_undirected_defaults_match_bnlearn(algorithm, expected, discrete):
+    """mmpc and si.hiton.pc learn parents and children without telling them
+    apart, so bnlearn returns an undirected graph for those unless asked
+    otherwise; the Markov-blanket algorithms orient what they can.  The parity
+    fixtures all pass `undirected` explicitly, which is why the default needs
+    a test of its own.
+
+    This checks the recorded flag rather than the shape of the result: a CPDAG
+    is legitimately all-undirected when the data contain no v-structure, so
+    inspecting the arcs would make the test depend on the data.
+    """
+    net = getattr(pybnlearn, algorithm)(discrete)
+    assert net.learning["undirected"] is expected
+
+
+@pytest.mark.parametrize("algorithm",
+                         ["gs", "iamb", "inter_iamb", "iamb_fdr",
+                          "mmpc", "si_hiton_pc"])
+def test_undirected_true_leaves_nothing_oriented(algorithm, discrete):
+    net = getattr(pybnlearn, algorithm)(discrete, undirected=True)
+    assert _is_undirected(net)
+
+
+def test_iamb_fdr_warns_rather_than_looping(discrete):
+    """iamb.fdr can revisit a blanket it has already seen; it must break out
+    and say so instead of spinning."""
+    import warnings as w
+    with w.catch_warnings():
+        w.simplefilter("error")          # any infinite-loop warning becomes an
+        pybnlearn.iamb_fdr(discrete)     # error, but it must still terminate

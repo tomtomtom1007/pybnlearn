@@ -21,7 +21,7 @@ Licensed under the GNU General Public License version 3 or later.
 from __future__ import annotations
 
 import itertools
-import math
+import warnings
 
 import pandas as pd
 
@@ -29,7 +29,8 @@ from ._core import Tester, cpdag_arcs, recover_structure
 from .structure import (BayesianNetwork, _check_complete, _data_type,
                         build_blacklist)
 
-__all__ = ["gs", "iamb", "inter_iamb"]
+__all__ = ["gs", "iamb", "iamb_fdr", "inter_iamb", "mmpc",
+           "si_hiton_pc"]
 
 
 _DISCRETE_TESTS = {"mi", "mi-adf", "mi-sh", "x2", "x2-adf"}
@@ -189,12 +190,214 @@ def _inter_ia_markov_blanket(tester, target, nodes, alpha, whitelist,
     return mb
 
 
+def _fdr_thresholds(m):
+    """The Benjamini-Yekutieli correction factors iamb.fdr applies.
+
+    Element i (one-based) is m/i * H_m, and it is matched against the i-th
+    smallest p-value, so the ordering of the tests is what decides which
+    threshold each node is held to.
+    """
+    harmonic = sum(1.0 / i for i in range(1, m + 1))
+    return [m / i * harmonic for i in range(1, m + 1)]
+
+
+def _ia_fdr_markov_blanket(tester, target, nodes, alpha, whitelist, blacklist,
+                           max_sx):
+    """ia.fdr.markov.blanket(): add and remove nodes by false discovery rate
+    rather than by raw p-value."""
+    candidates = [n for n in nodes if n != target]
+    thresholds = _fdr_thresholds(len(candidates))
+
+    whitelisted = [y for y in candidates
+                   if _listed(whitelist, (target, y), either=True)]
+
+    mb = list(dict.fromkeys(whitelisted))
+    culprit = []
+    state = []
+    last_added = last_removed = None
+
+    while True:
+        if len(mb) > max_sx:
+            break
+
+        if any(set(mb) == set(previous) for previous in state):
+            # The blanket has come back to somewhere it has already been.
+            # Undo whatever move led here and refuse to consider that node
+            # again, or the search never terminates.
+            if last_removed is not None:
+                mb = mb + [last_removed]
+                culprit.append(last_removed)
+            elif last_added is not None:
+                mb = [n for n in mb if n != last_added]
+                culprit.append(last_added)
+            if state:
+                state.pop()
+            warnings.warn(
+                "prevented an infinite loop while learning the Markov blanket "
+                f"of {target!r}", stacklevel=2)
+
+        state.append(list(mb))
+        snapshot = list(mb)
+
+        association = {node: tester.pvalue(target, node,
+                                           [n for n in mb if n != node])
+                       for node in candidates}
+        # smallest p-value first; the threshold a node is held to depends on
+        # its rank, so this ordering is part of the algorithm.
+        ordered = sorted(association, key=lambda n: association[n])
+        threshold = dict(zip(ordered, thresholds))
+
+        # removal, from the weakest association down.
+        blocked = set(whitelisted) | set(culprit)
+        if last_added is not None:
+            blocked.add(last_added)
+        for node in reversed([n for n in ordered if n in mb
+                              and n not in blocked]):
+            if association[node] * threshold[node] > alpha:
+                mb = [n for n in mb if n != node]
+                last_added, last_removed = None, node
+                break
+
+        if mb != snapshot:
+            continue
+
+        # addition, from the strongest association up.
+        blocked = set(mb) | set(culprit)
+        if last_removed is not None:
+            blocked.add(last_removed)
+        for node in [n for n in ordered if n in candidates
+                     and n not in blocked]:
+            if association[node] * threshold[node] <= alpha:
+                mb = mb + [node]
+                last_added, last_removed = node, None
+                break
+
+        if mb == snapshot:
+            break
+
+    return mb
+
+
 # ---------------------------------------------------------------------------
 # neighbourhoods and orientation
 # ---------------------------------------------------------------------------
 
-def _neighbour(tester, target, blankets, alpha, whitelist, blacklist, max_sx):
-    """neighbour(): cut the Markov blanket down to the direct neighbours."""
+def _mmpc_forward(tester, target, nodes, alpha, whitelist, blacklist, max_sx):
+    """maxmin.pc.forward.phase(): grow the candidate parent-children set by
+    max-min association."""
+    candidates = [n for n in nodes if n != target]
+    whitelisted = [y for y in candidates
+                   if _listed(whitelist, (target, y), either=True)]
+    blacklisted = [y for y in candidates
+                   if _listed(blacklist, (target, y), both=True)]
+
+    cpc = list(dict.fromkeys(whitelisted))
+    available = [n for n in candidates
+                 if n not in cpc and n not in blacklisted]
+
+    # A node's association can only get weaker as the conditioning set grows,
+    # so once it is above alpha it never has to be tested again.
+    association = {n: 0.0 for n in available}
+
+    while True:
+        if len(cpc) > max_sx:
+            break
+
+        to_check = [n for n in association if n not in cpc]
+        if not to_check:
+            break
+
+        # only subsets containing the node added last are new.
+        fixed = cpc[-1:] if cpc else []
+        sx = cpc[:-1] if cpc else []
+
+        updated = {}
+        for node in to_check:
+            result = tester.allsubs(node, target, sx=sx, fixed=fixed,
+                                    alpha=alpha)
+            updated[node] = max(association[node], result["max.p.value"])
+        association = updated
+
+        if not association or all(p > alpha for p in association.values()):
+            break
+        if not available:
+            break
+
+        to_add = min(association, key=association.get)
+        if association[to_add] <= alpha:
+            cpc.append(to_add)
+            available = [n for n in available if n != to_add]
+
+    return cpc
+
+
+def _hiton_forward(tester, target, nodes, alpha, whitelist, blacklist, max_sx):
+    """si.hiton.pc.heuristic(): rank candidates by marginal association once,
+    then admit them one at a time subject to a backward check."""
+    candidates = [n for n in nodes if n != target]
+    whitelisted = [y for y in candidates
+                   if _listed(whitelist, (target, y), either=True)]
+    blacklisted = [y for y in candidates
+                   if _listed(blacklist, (target, y), both=True)]
+
+    cpc = list(dict.fromkeys(whitelisted))
+    available = [n for n in candidates
+                 if n not in cpc and n not in blacklisted]
+
+    if not available:
+        return cpc
+
+    association = tester.pvalues(available, target, None)
+    available = [n for n in available if association[n] <= alpha]
+    if all(p > alpha for p in association.values()):
+        return cpc
+
+    while True:
+        if (not association or not available or len(cpc) > max_sx
+                or all(p > alpha for p in association.values())):
+            break
+
+        to_add = min(association, key=association.get)
+
+        # the candidate stays only if no subset of the current set separates
+        # it from the target.
+        keep = True
+        if cpc:
+            result = tester.allsubs(target, to_add, sx=cpc, min=1, alpha=alpha)
+            keep = result["p.value"] <= alpha
+
+        if keep:
+            cpc.append(to_add)
+
+        available = [n for n in available if n != to_add]
+        association = {k: v for k, v in association.items() if k != to_add}
+
+    return cpc
+
+
+def _fake_markov_blanket(structure, target):
+    """fake.markov.blanket(): everything within distance two of the target.
+
+    mmpc and si.hiton.pc learn neighbourhoods directly and never compute a
+    Markov blanket, but the orientation phase wants one; this superset is what
+    bnlearn substitutes.
+    """
+    out = []
+    for neighbour_ in structure[target]["nbr"]:
+        out.extend(structure[neighbour_]["nbr"])
+    out.extend(structure[target]["nbr"])
+    return [n for n in dict.fromkeys(out) if n != target]
+
+
+def _neighbour(tester, target, blankets, alpha, whitelist, blacklist, max_sx,
+               markov=True, empty_dsep=True):
+    """neighbour(): cut the candidate set down to the direct neighbours.
+
+    `markov` picks the cheaper of the two Markov blankets to search over, which
+    only makes sense when they really are Markov blankets; mmpc and
+    si.hiton.pc learn neighbourhoods, so they pass False.  `empty_dsep` allows
+    the empty conditioning set, which si.hiton.pc has already tested.
+    """
     candidates = list(blankets[target])
 
     if not candidates:
@@ -214,10 +417,14 @@ def _neighbour(tester, target, blankets, alpha, whitelist, blacklist, max_sx):
         return {"mb": list(blankets[target]), "nbr": candidates}
 
     for y in [n for n in list(candidates) if n not in whitelisted]:
-        dsep = _smaller([n for n in blankets[target] if n != y],
-                        [n for n in blankets[y] if n != target])
+        if markov:
+            dsep = _smaller([n for n in blankets[target] if n != y],
+                            [n for n in blankets[y] if n != target])
+        else:
+            dsep = [n for n in blankets[target] if n != y]
         result = tester.allsubs(target, y, sx=dsep, alpha=alpha,
-                                min=0, max=min(len(dsep), max_sx))
+                                min=0 if empty_dsep else 1,
+                                max=min(len(dsep), max_sx))
         if result["p.value"] > alpha:
             candidates.remove(y)
 
@@ -287,7 +494,8 @@ def _set_arc(arcs, frm, to):
 # ---------------------------------------------------------------------------
 
 def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
-                      test, alpha, max_sx, undirected):
+                      test, alpha, max_sx, undirected,
+                      markov_blankets=True, empty_dsep=True):
     _check_complete(data)
 
     if not isinstance(data, pd.DataFrame):
@@ -317,14 +525,26 @@ def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
                              max_sx)
             for node in nodes
         }
-        # the per-node results need not agree; make them symmetric.
-        blankets = recover_structure(blankets, nodes, markov_blankets=True)
+
+        if markov_blankets:
+            # the per-node results need not agree; make them symmetric.
+            blankets = recover_structure(blankets, nodes,
+                                         markov_blankets=True)
 
         structure = {
             node: _neighbour(tester, node, blankets, alpha, whitelist,
-                             blacklist, max_sx)
+                             blacklist, max_sx, markov=markov_blankets,
+                             empty_dsep=empty_dsep)
             for node in nodes
         }
+
+        if not markov_blankets:
+            # these algorithms never compute a Markov blanket, but the
+            # orientation phase needs one; distance two is the superset
+            # bnlearn substitutes.
+            for node in nodes:
+                structure[node]["mb"] = _fake_markov_blanket(structure, node)
+
         structure = recover_structure(structure, nodes, markov_blankets=False)
 
         arcs = _sets2arcs(structure, nodes)
@@ -407,3 +627,36 @@ def inter_iamb(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
     return _constraint_learn(data, _inter_ia_markov_blanket, "inter.iamb",
                              whitelist, blacklist, test, alpha, max_sx,
                              undirected)
+
+
+def iamb_fdr(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
+             max_sx=None, undirected=False):
+    """IAMB with false discovery rate control, as bnlearn's iamb.fdr()."""
+    return _constraint_learn(data, _ia_fdr_markov_blanket, "iamb.fdr",
+                             whitelist, blacklist, test, alpha, max_sx,
+                             undirected)
+
+
+def mmpc(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
+         max_sx=None, undirected=True):
+    """Max-Min Parents and Children, as bnlearn's mmpc().
+
+    Returns an undirected graph by default: this learns each node's set of
+    parents and children without distinguishing the two, so orienting the
+    result would claim more than the algorithm establishes.  bnlearn defaults
+    the same way.
+    """
+    return _constraint_learn(data, _mmpc_forward, "mmpc", whitelist,
+                             blacklist, test, alpha, max_sx, undirected,
+                             markov_blankets=False)
+
+
+def si_hiton_pc(data, whitelist=None, blacklist=None, test=None, alpha=0.05,
+                max_sx=None, undirected=True):
+    """Semi-Interleaved HITON-PC, as bnlearn's si.hiton.pc().
+
+    Like mmpc(), this returns an undirected graph by default.
+    """
+    return _constraint_learn(data, _hiton_forward, "si.hiton.pc", whitelist,
+                             blacklist, test, alpha, max_sx, undirected,
+                             markov_blankets=False, empty_dsep=False)
