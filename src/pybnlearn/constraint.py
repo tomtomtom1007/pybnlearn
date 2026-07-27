@@ -27,7 +27,9 @@ import pandas as pd
 
 from ._core import (Tester, cpdag_arcs, neighbourhoods,
                     recover_structure)
+from ._core import reset_test_counter, test_counter
 from .structure import (BayesianNetwork, _check_complete, _data_type,
+                        check_whitelist,
                         build_blacklist)
 
 __all__ = ["fast_iamb", "gs", "hpc", "iamb", "iamb_fdr", "inter_iamb",
@@ -641,6 +643,14 @@ def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
         if a not in nodes or b not in nodes:
             raise ValueError(f"unknown node in arc ({a}, {b})")
 
+    # A whitelist naming both directions of an arc is how an *undirected*
+    # constraint is written, which these algorithms do understand -- so only
+    # the acyclicity half of the check applies here.
+    whitelist = check_whitelist(whitelist, nodes, score_based=False)
+
+    # see the note in structure.hc(): the work counter lives in the C core.
+    reset_test_counter()
+
     # build.blacklist(): the reverse of a whitelisted arc is forbidden,
     # which is what fixes its direction during the orientation phase.
     blacklist = build_blacklist(blacklist, whitelist)
@@ -744,6 +754,7 @@ def _orient(tester, data, structure, nodes, algorithm, test, alpha, max_sx,
             "blacklist": blacklist,
             "undirected": undirected,
             "max.sx": max_sx,
+            "ntests": test_counter(),
         },
     )
 

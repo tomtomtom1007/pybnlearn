@@ -181,6 +181,30 @@ total with the corrected value.
 Exact inference covers discrete and Gaussian networks, but not mixtures of
 the two.
 
+Two limits on how far "matches R" goes, both found by the sweep below rather
+than reasoned about in advance.
+
+**Linear algebra is not bit-identical, and cannot be.** The vendored nmath and
+Mersenne-Twister make distributions and random streams agree with R exactly,
+but BLAS and LAPACK are the platform's, not R's — Accelerate on macOS,
+OpenBLAS on the Linux and Windows wheels, against whatever R itself was built
+with. Same C, same input bits, different summation order. On well-conditioned
+data this is invisible at 1e-12; on badly conditioned data it is not. For a
+data set built with two columns correlated to 1 − 5e-13, a partial correlation
+agrees with R only to about four digits — and measured against exact rational
+arithmetic, *neither* answer is better: R is wrong by 6.6e-5, this by 2.9e-4,
+against a forward error bound of 1.5e-3. The data do not determine those
+digits. `test_the_ill_conditioned_disagreement_is_not_a_defect` does that
+arithmetic rather than asserting it. Expect the same across platforms.
+
+**`mmpc` does more work than R's for the same answer.** Its arcs agree
+everywhere they are compared, but `ntests()` is higher: R's forward phase
+carries an association vector between iterations and stops re-testing nodes
+already ruled out, and that memoisation is not ported. The maximum p-value
+over subsets is monotone in the conditioning set, so the extra tests cannot
+change the outcome. Every other algorithm's counter matches R exactly, which
+is what makes this visible at all.
+
 One inconsistency *is* reproduced rather than smoothed over, because
 smoothing it over would be the divergence: `bdj` accepts `prior` and `beta`
 and then ignores them, scoring as if the prior were uniform -- while still
@@ -190,7 +214,7 @@ the fixtures pin down both halves of it.
 
 ## Verified against R
 
-`pytest` runs 3872 checks, 3716 of which compare directly against values produced
+`pytest` runs 8852 checks, 8443 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -278,6 +302,23 @@ by R 4.6.1 with bnlearn 5.2.1:
   hill-climbing restarts built on them, every extension of an equivalence
   class, exact graph counts, Bayes-factor arc strengths in extended
   precision, deduplication, and bootstrapping an arbitrary statistic;
+* 4727 results from an exhaustive sweep, which exists because the fixtures
+  above are cases chosen by hand and share the blind spots of the hand that
+  chose them. Here the arguments are *crossed* rather than varied one at a
+  time; the ten data sets are awkward on purpose — two observations per
+  contingency-table cell, eleven levels against two, 98% of the mass on one
+  level, near-determinism, more variables than the sample supports, nearly
+  collinear columns, ten orders of magnitude between columns, Cauchy tails,
+  thirty rows; and 60 combinations have no solution, so the paths that refuse
+  are exercised too. Every score on every data set with its per-node
+  breakdown, every independence test over every ordered pair at three
+  conditioning-set sizes, every constraint algorithm against every test, and
+  `ntests()` for all eleven searches — the last being the sharpest check
+  there is, since two different search paths can reach the same arcs but not
+  the same amount of work. Writing it found four defects the hand-chosen
+  fixtures could not: `nparams` refused a fitted network and miscounted
+  Gaussian nodes, `connected_components` returned a bare string for a
+  one-node component, and `hc`/`tabu` accepted whitelists R rejects;
 * 22 adjacency-matrix results over ten graphs, including two partially
   directed ones -- an undirected arc is a symmetric pair of ones, so the
   matrix cannot tell it from two opposed directed arcs, and the round trip
@@ -327,6 +368,7 @@ Rscript tools/gen_r_lingam_fixtures.R
 Rscript tools/gen_r_misc_fixtures.R      # also needs gmp and Rmpfr
 Rscript tools/gen_r_priors_fixtures.R
 Rscript tools/gen_r_amat_fixtures.R
+Rscript tools/gen_r_sweep_fixtures.R
 ```
 
 ## Performance

@@ -22,7 +22,9 @@ import math
 import numpy as np
 import pandas as pd
 
-from ._core import Search, alpha_star_value, topological_order
+from ._core import (Search, alpha_star_value, reset_test_counter,
+                    test_counter, topological_order)
+from ._core import acyclic as _acyclic
 
 __all__ = ["BF", "BayesianNetwork", "alpha_star", "blacklist", "hc",
            "ntests", "score", "tabu", "whitelist"]
@@ -236,6 +238,51 @@ def _check_start(start, nodes):
                 f"variables: {len(start.nodes)} and {len(nodes)}")
         raise ValueError("the network and the data have different variables")
     return list(start.arcs)
+
+
+def check_whitelist(whitelist, nodes, score_based):
+    """check.whitelist(): what a whitelist is not allowed to ask for.
+
+    Two things, and they are not the same thing.
+
+    Both directions of one arc is how an *undirected* constraint is written,
+    which the constraint-based algorithms understand and the score-based ones
+    do not -- hill climbing orients every arc, so it has no way to honour a
+    request not to.  R refuses it there and accepts it here; dropping one of
+    the two directions instead, which is what this used to do, silently
+    answers a question the user did not ask.
+
+    A whitelist that cannot be part of any acyclic graph is impossible for
+    every algorithm.  Left unchecked the score-based searches reported it as
+    a cycle in the *starting* network, which is misleading when the caller
+    passed no starting network at all.
+    """
+    whitelist = [(str(a), str(b)) for a, b in (whitelist or ())]
+    if not whitelist:
+        return whitelist
+
+    unknown = {n for arc in whitelist for n in arc} - set(nodes)
+    if unknown:
+        raise ValueError("unknown node(s) in the whitelist: "
+                         + ", ".join(sorted(unknown)))
+
+    if score_based:
+        both = sorted({tuple(sorted(a)) for a in whitelist
+                       if (a[1], a[0]) in set(whitelist)})
+        if both:
+            raise ValueError(
+                "score-based algorithms do not support whitelisting both "
+                "directions of an arc: "
+                + ", ".join(f"({a}, {b})" for a, b in both))
+
+    # An undirected pair constrains adjacency but not direction, so it cannot
+    # close a cycle by itself and is left out of the check.
+    present = set(whitelist)
+    directed = [a for a in whitelist if (a[1], a[0]) not in present]
+    if not _acyclic(list(nodes), directed, directed=True):
+        raise ValueError("this whitelist does not allow an acyclic graph")
+
+    return whitelist
 
 
 def build_blacklist(blacklist, whitelist):
@@ -587,7 +634,15 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
 
     # whitelisting an arc forbids its reverse, which is what stops the
     # search from considering the other direction.
+    whitelist = check_whitelist(whitelist, nodes, score_based=True)
     blacklist = build_blacklist(blacklist, whitelist)
+
+    # ntests() reports how much work the search did, which only agrees with
+    # R if the search took the same path -- a sharper check on the search
+    # than the arc set, where two different paths can meet.  The counter
+    # lives in the C core and is process-wide, so it is reset here and read
+    # back below; the core lock keeps a concurrent search out of it.
+    reset_test_counter()
 
     blmat = _amat_of(blacklist)
     wlmat = _amat_of(whitelist)
@@ -744,6 +799,7 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
             "whitelist": list(whitelist or ()),
             "blacklist": list(blacklist or ()),
             "iterations": iterations,
+            "ntests": test_counter(),
         },
     )
 
@@ -811,7 +867,15 @@ def tabu(data, start=None, whitelist=None, blacklist=None, score=None,
     score = _check_score(score, data)
     extra = _check_score_args(score, data, extra_args)
 
+    whitelist = check_whitelist(whitelist, nodes, score_based=True)
     blacklist = build_blacklist(blacklist, whitelist)
+
+    # ntests() reports how much work the search did, which only agrees with
+    # R if the search took the same path -- a sharper check on the search
+    # than the arc set, where two different paths can meet.  The counter
+    # lives in the C core and is process-wide, so it is reset here and read
+    # back below; the core lock keeps a concurrent search out of it.
+    reset_test_counter()
 
     def _amat_of(pairs):
         out = np.zeros((n, n), dtype=np.int32)
@@ -934,6 +998,7 @@ def tabu(data, start=None, whitelist=None, blacklist=None, score=None,
             "blacklist": list(blacklist or ()),
             "tabu": tabu,
             "iterations": iterations,
+            "ntests": test_counter(),
         },
     )
 

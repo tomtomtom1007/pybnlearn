@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import itertools
 import re
+import warnings
+
+import numpy as np
 
 from ._core import (chow_liu_arcs, aracne_arcs, components, count_parameters,
                     cpdag_arcs, extend_pdag, structural_hamming,
@@ -144,11 +147,58 @@ def compare(target, current, arcs=False):
     return {"tp": len(tp), "fp": len(fp), "fn": len(fn)}
 
 
-def nparams(net, data, estimator=None):
-    """The number of free parameters the network implies for this data."""
+def nparams(net, data=None, estimator=None):
+    """The number of free parameters the network implies.
+
+    A structure needs the data to say so, because how many parameters a node
+    costs depends on how many levels its variables have.  A *fitted* network
+    already carries them, so `data` is not needed and is ignored -- R warns
+    about it rather than refusing, and counts from the parameters either way.
+    """
+    from .fit import FittedNetwork
+
+    if isinstance(net, FittedNetwork):
+        if data is not None:
+            warnings.warn("unused argument 'data': a fitted network already "
+                          "carries the parameters being counted",
+                          stacklevel=2)
+        return sum(_node_parameters(net[node]) for node in net.nodes)
+
+    if data is None:
+        raise ValueError(
+            "counting the parameters of a structure needs the data: how many "
+            "a node costs depends on how many levels its variables have")
     if estimator is None:
         estimator = "bic" if _data_type(data) == "discrete" else "bic-g"
-    return count_parameters(net.nodes, net.arcs, data, estimator)
+    # the C counts into a double; a count is an integer, as R's is.
+    return int(count_parameters(net.nodes, net.arcs, data, estimator))
+
+
+def _node_parameters(node):
+    """One node's free parameters, counted from its own parameters.
+
+    A discrete node's table has one redundant probability per parent
+    configuration, since each column sums to one.  A Gaussian node costs its
+    regression coefficients plus the residual standard deviation, and a
+    conditional Gaussian one costs that for every configuration of its
+    discrete parents.
+    """
+    table = getattr(node, "probabilities", None)
+    if table is not None:
+        shape = np.shape(table)
+        return int(np.prod(shape[1:], dtype=np.int64)) * (shape[0] - 1)
+
+    # The coefficients are a dict keyed by parent name -- with the intercept
+    # under "(Intercept)" -- so np.asarray() of them is a nought-dimensional
+    # object array of size one, not a vector.  Counting that gave every
+    # Gaussian node two parameters regardless of how many parents it had.
+    coefficients = node.coefficients
+    if isinstance(coefficients, dict):
+        count = sum(np.size(v) for v in coefficients.values())
+    else:
+        count = np.asarray(coefficients).size
+
+    return int(count + np.size(node.sd))
 
 
 def subgraph(net, nodes):
@@ -356,11 +406,17 @@ def connected_components(x):
     here, so the test below is a maximum-cardinality search.  Chordality is
     a property of the graph rather than of how you look for it, so any
     correct test agrees -- unlike most of this package, this is not a port.
+
+    Each component is a list of node names, a one-node component included.
+    R gets away with returning a bare name there because a length-one
+    character vector is still a vector; a Python string is not a list of one
+    name, and iterating it would give letters.
     """
     net = _as_graph(x)
     loose = [(a, b) for a, b in net.arcs if (b, a) in set(net.arcs)]
 
-    return [(component, _chordal(component, loose))
+    return [([component] if isinstance(component, str) else list(component),
+             _chordal(component, loose))
             for component in components(net.nodes, loose)]
 
 
