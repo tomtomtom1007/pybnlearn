@@ -10,16 +10,14 @@ for Bayesian network structure learning, parameter learning and inference.
 > each one runs the whole parity suite before it is kept. Nobody outside this
 > repository has used it yet, so expect the first releases to be alphas.
 >
-> **This is a port, not a drop-in replacement**, and two of the gaps are
-> worth knowing before you start rather than after. Plotting (`graphviz.*`,
+> **This is a port, not a drop-in replacement.** Plotting (`graphviz.*`,
 > `strength.plot`, the `bn.fit.*` lattice plots) and the conversions to
 > igraph, gRain, graphNEL and `lm` are **not here at all** — they would be
 > rewrites rather than ports. And `direct_lingam` reproduces R's causal
-> *ordering* exactly but chooses the arcs differently, because R picks them
-> with glmnet's adaptive lasso and glmnet is not vendored: it returns a
-> different structure without complaining, which is the one divergence here
-> that will not announce itself. Both are set out in full
-> [below](#what-works).
+> ordering exactly but picks each node's parents with a score-based search
+> where R uses glmnet's adaptive lasso: measured over eight cases it agrees
+> on six and is *less sparse* on two, keeping arcs R prunes and never the
+> reverse. Both are set out in full [below](#what-works).
 
 ## What makes this a port rather than a reimplementation
 
@@ -185,7 +183,15 @@ forms (`nodes<-`, `arcs<-`, `parents<-`, `children<-`, `modelstring<-`,
 Three things are deliberately not reproduced, and each is documented where
 it lives.  `direct_lingam` gives R's causal *ordering* exactly, but picks
 the arcs with a score-based search rather than with glmnet's adaptive lasso,
-which is not vendored.  `mi = "gkernel"` raises rather than returning a
+which is not vendored.  `tests/parity/test_lingam_arcs.py` measures how far
+apart that leaves them -- six of eight cases identical, two differing only
+by arcs this keeps and R prunes -- and fails if the gap widens, narrows or
+changes direction.  Porting glmnet would not close it cleanly: its lambda
+path stops when the gain in deviance falls below 1e-5 times the deviance,
+and that comparison came down to 7.865e-06 against 7.634e-06 on the first
+data set tried, so the number of lambdas -- and thus which one is selected
+-- flips with the convergence tolerance.  Matching it needs glmnet's
+arithmetic rather than its method.  `mi = "gkernel"` raises rather than returning a
 number: bnlearn builds its Gram matrix with a matrix product where it means
 an elementwise one, leaving a condition number around 1e20, so R's own
 answer is floating-point noise and cannot be reproduced by anything.  And
@@ -243,7 +249,7 @@ the fixtures pin down both halves of it.
 
 ## Verified against R
 
-`pytest` runs 9363 checks, 8699 of which compare directly against values produced
+`pytest` runs 9381 checks, 8707 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -399,6 +405,7 @@ Rscript tools/gen_r_priors_fixtures.R
 Rscript tools/gen_r_amat_fixtures.R
 Rscript tools/gen_r_sweep_fixtures.R
 Rscript tools/gen_r_rejection_fixtures.R
+Rscript tools/gen_r_lingam_arcs_fixtures.R  # also needs glmnet
 ```
 
 ## Performance

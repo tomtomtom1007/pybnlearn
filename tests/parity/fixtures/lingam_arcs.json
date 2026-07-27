@@ -1,0 +1,10 @@
+[
+{"kind":"lingam.arcs","dataset":"nongaussian","file":"nongaussian.csv","rows":200,"ordering":["V1","V2","V3","V4","V5"],"arcs":[["V1","V2"],["V1","V3"],["V2","V3"],["V3","V4"],["V2","V5"],["V4","V5"]]},
+{"kind":"lingam.arcs","dataset":"nongaussian","file":"nongaussian.csv","rows":400,"ordering":["V1","V2","V3","V4","V5"],"arcs":[["V1","V2"],["V1","V3"],["V2","V3"],["V3","V4"],["V2","V5"],["V4","V5"]]},
+{"kind":"lingam.arcs","dataset":"gaussian.test","file":"gaussian.test.csv","rows":200,"ordering":["A","G","F","C","B","E","D"],"arcs":[["A","F"],["G","F"],["G","C"],["F","C"],["A","B"],["C","B"],["A","E"],["G","E"],["F","E"],["B","E"],["B","D"]]},
+{"kind":"lingam.arcs","dataset":"gaussian.test","file":"gaussian.test.csv","rows":1000,"ordering":["G","F","C","A","B","E","D"],"arcs":[["G","F"],["G","C"],["F","C"],["G","A"],["F","A"],["C","B"],["A","B"],["G","E"],["F","E"],["A","E"],["B","E"],["B","D"]]},
+{"kind":"lingam.arcs","dataset":"gaussian.test","file":"gaussian.test.csv","rows":5000,"ordering":["E","G","A","D","F","C","B"],"arcs":[["E","F"],["G","F"],["A","F"],["D","F"],["A","C"],["D","C"],["D","B"]]},
+{"kind":"lingam.arcs","dataset":"collinear","file":"sweep.collinear.csv","rows":200,"ordering":["C","D","A","B"],"arcs":[["C","A"],["A","B"]]},
+{"kind":"lingam.arcs","dataset":"heavy-tailed","file":"sweep.heavy-tailed.csv","rows":180,"ordering":["A","B","C","D"],"arcs":[["A","B"]]},
+{"kind":"lingam.arcs","dataset":"scaled","file":"sweep.scaled.csv","rows":150,"ordering":["D","A","C","B"],"arcs":[]}
+]
