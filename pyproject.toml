@@ -87,7 +87,11 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 # is no Fortran involved any more: R's two LINPACK routines are translated to
 # C in src/c/linpack/, checked against the originals by
 # tools/check_linpack.sh.
+#
+# No PKG_CONFIG_PATH here: meson.build asks the interpreter where the package
+# put its headers and library instead.  Writing a .pc file and pointing a
+# relative PKG_CONFIG_PATH at it looks right and finds nothing, because
+# pkg-config runs with the build directory as its working directory.
 [tool.cibuildwheel.windows]
-before-build = "pip install delvewheel scipy-openblas64 && python -c \"import scipy_openblas64, pathlib; pathlib.Path('openblas.pc').write_text(scipy_openblas64.get_pkg_config())\""
-environment = { PKG_CONFIG_PATH = "." }
-repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+before-build = "pip install delvewheel scipy-openblas64"
+repair-wheel-command = "python {package}/tools/repair_windows_wheel.py {dest_dir} {wheel}"

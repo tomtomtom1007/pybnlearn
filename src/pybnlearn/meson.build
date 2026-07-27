@@ -11,7 +11,13 @@ core_c = custom_target(
 py.extension_module(
   '_core',
   core_c,
-  c_args: np_inc_args,
+  # R_NO_REMAP turns off rcompat.h's unprefixed aliases for this translation
+  # unit only.  It is the one that also includes Python.h, and the aliases are
+  # common words: `length` collides with PyASCIIObject's member of that name,
+  # rewriting `obj->length` into `obj->Rf_length`.  The binding calls Rf_*
+  # directly, so it loses nothing; the vendored bnlearn sources still get the
+  # aliases, because they are written against them.
+  c_args: np_inc_args + ['-DR_NO_REMAP'],
   dependencies: [pybn_core_dep, py.dependency()],
   subdir: 'pybnlearn',
   install: true,

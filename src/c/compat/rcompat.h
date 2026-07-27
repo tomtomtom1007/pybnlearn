@@ -1,7 +1,8 @@
 /* pybnlearn: the R C API, reimplemented so that bnlearn builds without R.
  *
  * The vendored bnlearn sources under src/c/bnlearn/ are byte-identical to
- * upstream and keep including <R.h>, <Rinternals.h>, <Rmath.h> and <R_ext/*.h>
+ * upstream and keep including <R.h>, <Rinternals.h>, <Rmath.h> and the
+ * R_ext headers
  * exactly as they do on CRAN.  Those names are satisfied by the forwarding
  * headers in compat/rapi/, which all resolve to this file; nothing in the
  * vendored tree is patched, so tracking a new bnlearn release is a matter of
@@ -289,11 +290,33 @@ double fmin2(double x, double y);
  * the rest of the R API it is not remapped through an Rf_ prefix. */
 double choose(double n, double k);
 
+/* R's headers guarantee these to the packages that include them, and the
+ * vendored bnlearn sources use them without defining them.  Two are R's own
+ * (M_LN_SQRT_PI, M_LN_SQRT_2PI) and never come from anywhere else; the rest
+ * are BSD extensions that <math.h> exposes only outside strict ANSI mode.
+ * Building at c_std=c11 puts glibc in exactly that mode, so on Linux they
+ * are absent -- which is why this list has to be complete rather than
+ * whatever the development machine happened to be missing.  macOS defines
+ * them regardless, which is why M_SQRT1_2 went unnoticed until the first
+ * Linux build.
+ *
+ * Adding one here is the right place: the vendored sources under
+ * src/c/bnlearn/ stay byte-identical to the CRAN tarball, and this header
+ * is the shim that stands in for R's.  Keep it in step with what
+ *   grep -rhoE '\bM_[A-Za-z0-9_]+' src/c/bnlearn/ src/c/linpack/
+ * turns up.
+ */
 #ifndef M_PI
 #define M_PI 3.141592653589793238462643383279502884197169399375
 #endif
 #ifndef M_LN2
 #define M_LN2 0.693147180559945309417232121458176568
+#endif
+#ifndef M_SQRT1_2
+#define M_SQRT1_2 0.707106781186547524400844362104849039
+#endif
+#ifndef M_SQRT2
+#define M_SQRT2 1.414213562373095048801688724209698079
 #endif
 #ifndef M_LN_SQRT_PI
 #define M_LN_SQRT_PI 0.572364942924700087071713675677
@@ -361,7 +384,22 @@ void F77_NAME(dqrsl)(const double *x, const int *ldx, const int *n,
 /* -------------------------------------------------------------------------
  * the remapping, kept identical to R's so that bnlearn's sources compile
  * exactly as they do under R.
+ *
+ * Gated on R_NO_REMAP, as R's own headers are, and for the reason R offers
+ * it: these are unprefixed common words, and a translation unit that also
+ * includes somebody else's headers will collide.  `length` is the one that
+ * bites -- CPython's PyASCIIObject has a member of that name, so the macro
+ * silently rewrites `obj->length` into `obj->Rf_length` and the compiler
+ * reports a missing member in a struct this project never wrote.  It shows
+ * up only on some CPython versions, because whether the accessor is inlined
+ * into the generated C depends on the version, which is why it survived
+ * every local build and appeared on the first CI run.
+ *
+ * The binding in src/pybnlearn/ defines R_NO_REMAP and calls Rf_* directly;
+ * the vendored bnlearn sources do not, and must not.
  * ------------------------------------------------------------------------- */
+
+#ifndef R_NO_REMAP
 
 #define allocVector   Rf_allocVector
 #define match         Rf_match
@@ -398,6 +436,8 @@ void F77_NAME(dqrsl)(const double *x, const int *ldx, const int *n,
 #define error         Rf_error
 #define warning       Rf_warning
 #define eval          Rf_eval
+
+#endif /* R_NO_REMAP */
 
 /* bnlearn's own convenience macros (isTRUE, INT, NUM, NODE, MIN, MAX) are not
  * defined here: they come from the vendored src/include/rcore.h, which is left
