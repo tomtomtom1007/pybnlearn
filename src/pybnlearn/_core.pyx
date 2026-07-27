@@ -2196,6 +2196,61 @@ cdef object _dimnames_of(SEXP x, int axis):
 
 
 # ---------------------------------------------------------------------------
+# adjacency matrices
+# ---------------------------------------------------------------------------
+
+def arcs_to_amat(arcs, node_names):
+    """arcs2amat(): the arc set as a square 0/1 matrix.
+
+    An undirected arc is held as both directions, so it comes out as a
+    symmetric pair of ones rather than as anything of its own.
+    """
+    cdef SEXP a[2]
+    cdef int n = len(node_names)
+
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _arcs_sexp(arcs)
+        a[1] = _str_vector(node_names)
+        return _read_int_matrix(_guarded(<void *>arcs2amat, a, 2), n, n)
+    finally:
+        pybn_arena_pop()
+
+
+def amat_to_arcs(matrix, node_names):
+    """amat2arcs(): the arc set a 0/1 matrix stands for."""
+    cdef SEXP a[2]
+    cdef SEXP amat, dim
+    cdef cnp.ndarray[cnp.int32_t, ndim=2] m
+    cdef int i, j, n
+
+    node_names = [str(v) for v in node_names]
+    m = np.ascontiguousarray(np.asarray(matrix, dtype=np.int32))
+    n = m.shape[0]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        amat = Rf_allocVector(INTSXP, n * n)
+        for j in range(n):
+            for i in range(n):
+                INTEGER(amat)[j * n + i] = m[i, j]
+        dim = Rf_allocVector(INTSXP, 2)
+        INTEGER(dim)[0] = n
+        INTEGER(dim)[1] = n
+        Rf_setAttrib(amat, R_DimSymbol, dim)
+
+        a[0] = amat
+        a[1] = _str_vector(node_names)
+        return _arcs_from_sexp(_guarded(<void *>amat2arcs, a, 2))
+    finally:
+        pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
 # network averaging
 # ---------------------------------------------------------------------------
 

@@ -21,18 +21,24 @@ Licensed under the GNU General Public License version 3 or later.
 
 from __future__ import annotations
 
+import warnings
+
+import numpy as np
+import pandas as pd
+
 from ._core import acyclic as _acyclic
-from ._core import node_structure
+from ._core import amat_to_arcs, arcs_to_amat, node_structure
 from .fit import FittedNetwork
 from .structure import BayesianNetwork
 
 __all__ = [
-    "add_node", "alst", "ancestors", "arcs", "children", "compelled_arcs",
+    "add_node", "alst", "amat", "ancestors", "arcs", "children",
+    "compelled_arcs",
     "degree", "descendants", "directed_arcs", "drop_arc", "drop_edge",
     "in_degree", "incident_arcs", "incoming_arcs", "isolated_nodes", "mb",
     "narcs", "nbr", "nnodes", "out_degree", "outgoing_arcs", "parents",
     "remove_node", "rename_nodes", "reverse_arc", "reversible_arcs",
-    "set_arc", "set_edge", "spouses", "undirected_arcs",
+    "set_amat", "set_arc", "set_edge", "spouses", "undirected_arcs",
 ]
 
 
@@ -83,6 +89,25 @@ def alst(x):
 def narcs(x):
     """How many arcs, counting an undirected one once."""
     return _graph(x).narcs
+
+
+def amat(x):
+    """The adjacency matrix: a square frame of zeros and ones, labelled with
+    the node names in the network's own node order.
+
+    Row *i*, column *j* is one when an arc runs from node *i* to node *j*.
+    An undirected arc is held as both directions, so it shows up as a
+    symmetric pair rather than as anything distinguishable -- a matrix
+    cannot tell an undirected arc from two opposed directed ones, and
+    neither can this.  `undirected_arcs` can.
+
+    R returns a bare matrix; a labelled frame is the same object with the
+    dimnames R's `amat` also attaches, and `.to_numpy()` gets the bare one
+    back.
+    """
+    network = _graph(x)
+    return pd.DataFrame(arcs_to_amat(network.arcs, network.nodes),
+                        index=network.nodes, columns=network.nodes)
 
 
 def parents(x, node):
@@ -342,6 +367,87 @@ def drop_edge(x, frm, to):
         updated = list(network.arcs)
 
     return _rebuild(network, updated, check_cycles=False)
+
+
+def set_amat(x, matrix, check_cycles=True, check_illegal=True):
+    """Replace every arc at once, from an adjacency matrix.
+
+    The other edits here change one arc; this one describes the whole graph,
+    which is what makes it the way to build a network from something that
+    already has an adjacency matrix.  Anything square and rectangular will
+    do -- an array, a nested sequence, a labelled frame.
+
+    Labels, when there are any, are checked rather than ignored: a matrix
+    whose rows and columns name the same nodes in a different order is
+    rearranged into the network's order, with a warning, because silently
+    reading it positionally would build a different graph from the one it
+    describes.  R does the same.
+    """
+    if not isinstance(x, BayesianNetwork):
+        raise TypeError("a BayesianNetwork is required to edit arcs")
+
+    updated = amat_to_arcs(_check_amat(matrix, x.nodes), x.nodes)
+
+    if check_illegal:
+        illegal = sorted(set(updated) & {tuple(a)
+                                         for a in x.learning.get("illegal", [])})
+        if illegal:
+            raise ValueError(
+                "the following arcs are not valid due to the parametric "
+                "assumptions of the network: "
+                + ", ".join(f"({a}, {b})" for a, b in illegal))
+
+    return _rebuild(x, updated, check_cycles)
+
+
+def _check_amat(matrix, nodes):
+    """check.amat(): square, labelled with these nodes if labelled at all,
+    zeros and ones, and nothing on the diagonal."""
+    if isinstance(matrix, pd.DataFrame):
+        rows, columns = list(matrix.index), list(matrix.columns)
+        values = matrix.to_numpy()
+    else:
+        rows = columns = None
+        values = np.asarray(matrix)
+
+    if values.ndim != 2 or values.shape[0] != values.shape[1]:
+        raise ValueError(
+            "an adjacency matrix must be a 2-dimensional square matrix")
+    if values.shape[0] != len(nodes):
+        raise ValueError(
+            f"the adjacency matrix is {values.shape[0]}x{values.shape[1]} but "
+            f"the graph has {len(nodes)} nodes")
+
+    if rows is not None:
+        # An unlabelled frame gets a RangeIndex, which is not a claim about
+        # node names and should not be read as one.
+        labelled = [str(v) for v in rows] != [str(i) for i in range(len(rows))]
+        if labelled:
+            unknown = ({str(v) for v in rows} | {str(v) for v in columns}
+                       ) - set(nodes)
+            if unknown:
+                raise ValueError(
+                    "node(s) not present in the graph: "
+                    + ", ".join(sorted(unknown)))
+            if [str(v) for v in rows] != [str(v) for v in columns]:
+                raise ValueError(
+                    "row/column names mismatch in the adjacency matrix")
+            if [str(v) for v in rows] != list(nodes):
+                warnings.warn(
+                    "rearranging the rows/columns of the adjacency matrix",
+                    stacklevel=3)
+                values = matrix.loc[nodes, nodes].to_numpy()
+
+    values = np.asarray(values)
+    if not np.isin(values, (0, 1)).all():
+        raise ValueError(
+            "all the elements of an adjacency matrix must be equal to either "
+            "0 or 1")
+    values = values.astype(np.int32)
+    if values.diagonal().any():
+        raise ValueError("the elements on the diagonal must be zero")
+
+    return values
 
 
 def _edit_arguments(x, frm, to):

@@ -96,6 +96,10 @@ pybnlearn.score(net, data, type="bde", prior="marginal", beta=0.9)
 pybnlearn.score(net, data, type="bde", prior="cs", beta=pd.DataFrame(
     {"from": ["A", "B"], "to": ["B", "C"], "prob": [0.9, 0.05]}))
 pybnlearn.hc(data, score="bde", prior="vsp", beta=0.1)
+
+# the whole graph at once, in and out
+pybnlearn.amat(net)              # a labelled square frame of 0s and 1s
+pybnlearn.set_amat(net, matrix)  # ... and back to a network
 ```
 
 ### Two notes on `pandas.read_csv` and categorical data
@@ -137,8 +141,8 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Colliders and equivalence | `colliders`, `vstructs`, `shielded_colliders`, `unshielded_colliders`, `cextend`, `cextend_all` |
 | Generating graphs | `random_graph` (ordered, ic-dag, melancon), `complete_graph`, `empty_graph`, `perturb`, `count_graphs` |
 | Preprocessing | `discretize` (quantile, interval, Hartemink), `configs`, `dedup` |
-| Nodes and arcs | `parents`, `children`, `mb`, `nbr`, `spouses`, `ancestors`, `descendants`, `root_nodes`, `leaf_nodes`, `isolated_nodes`, `degree`, `in_degree`, `out_degree`, `arcs`, `narcs`, `nnodes`, `directed_arcs`, `undirected_arcs`, `incoming_arcs`, `outgoing_arcs`, `incident_arcs`, `compelled_arcs`, `reversible_arcs` |
-| Editing a graph | `set_arc`, `drop_arc`, `reverse_arc`, `set_edge`, `drop_edge`, `add_node`, `remove_node`, `rename_nodes` |
+| Nodes and arcs | `amat`, `set_amat`, `parents`, `children`, `mb`, `nbr`, `spouses`, `ancestors`, `descendants`, `root_nodes`, `leaf_nodes`, `isolated_nodes`, `degree`, `in_degree`, `out_degree`, `arcs`, `narcs`, `nnodes`, `directed_arcs`, `undirected_arcs`, `incoming_arcs`, `outgoing_arcs`, `incident_arcs`, `compelled_arcs`, `reversible_arcs` |
+| Editing a graph | `set_amat` (every arc at once), `set_arc`, `drop_arc`, `reverse_arc`, `set_edge`, `drop_edge`, `add_node`, `remove_node`, `rename_nodes` |
 | Constraints from orderings | `ordering2blacklist`, `tiers2blacklist`, `set2blacklist` |
 | Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones, `mle-cg` for mixtures of the two; `custom_fit` to supply parameters by hand; `bn_net` to drop them again |
 | Incomplete data | `impute` — from a node's parents, by likelihood weighting, or exactly; `structural_em` to learn a structure despite the gaps, latent variables included |
@@ -153,14 +157,13 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Graph priors | `uniform`, `vsp`, `marginal`, `cs` (Castelo & Siebes) — passed to any Bayesian score as `prior=` and `beta=` |
 | Utilities | `score`, `modelstring`, `identifiable`, `singular`, `whitelist`, `blacklist`, `ntests` |
 
-137 of bnlearn's 160 exported functions are covered.  Fifteen of the
-remaining twenty-three are deliberately out of scope -- the nine plotting
-functions and the six conversions to igraph, graphNEL, gRain and `lm` --
-because they would be rewrites rather than ports, with nothing to check
-against.  Six more are R's assignment forms (`nodes<-`, `arcs<-`,
-`parents<-`, `children<-`, `modelstring<-`, `alst<-`), whose effect is
-available here as ordinary functions.  That leaves `amat` and `amat<-`, the
-adjacency-matrix accessor, genuinely unported.
+139 of bnlearn's 160 exported functions are covered, and nothing of
+substance is left.  Fifteen of the remaining twenty-one are deliberately out
+of scope -- the nine plotting functions and the six conversions to igraph,
+graphNEL, gRain and `lm` -- because they would be rewrites rather than
+ports, with nothing to check against.  The other six are R's assignment
+forms (`nodes<-`, `arcs<-`, `parents<-`, `children<-`, `modelstring<-`,
+`alst<-`), whose effect is available here as ordinary functions.
 
 Three things are deliberately not reproduced, and each is documented where
 it lives.  `direct_lingam` gives R's causal *ordering* exactly, but picks
@@ -186,7 +189,7 @@ the fixtures pin down both halves of it.
 
 ## Verified against R
 
-`pytest` runs 3805 checks, 3694 of which compare directly against values produced
+`pytest` runs 3854 checks, 3716 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -274,6 +277,12 @@ by R 4.6.1 with bnlearn 5.2.1:
   hill-climbing restarts built on them, every extension of an equivalence
   class, exact graph counts, Bayes-factor arc strengths in extended
   precision, deduplication, and bootstrapping an arbitrary statistic;
+* 22 adjacency-matrix results over ten graphs, including two partially
+  directed ones -- an undirected arc is a symmetric pair of ones, so the
+  matrix cannot tell it from two opposed directed arcs, and the round trip
+  is recorded rather than assumed.  The row/column convention and the arc
+  order coming back out are compared too: both are invisible in a
+  same-shaped answer and decide how everything downstream reads;
 * 235 results for the non-uniform graph priors: four Castelo & Siebes
   completions, and nine prior settings crossed with three data sets, five
   scores and both `hc` and `tabu` -- which is what pins down the
@@ -316,6 +325,7 @@ Rscript tools/gen_r_causal_fixtures.R
 Rscript tools/gen_r_lingam_fixtures.R
 Rscript tools/gen_r_misc_fixtures.R      # also needs gmp and Rmpfr
 Rscript tools/gen_r_priors_fixtures.R
+Rscript tools/gen_r_amat_fixtures.R
 ```
 
 ## Performance

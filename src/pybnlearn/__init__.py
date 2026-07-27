@@ -35,13 +35,13 @@ from .graph import (acyclic, aracne, cextend, cextend_all, chow_liu,
                     sid, skeleton, subgraph, tiers2blacklist,
                     unshielded_colliders, valid_cpdag, valid_dag, valid_ug,
                     vstructs)
-from .nodes import (add_node, alst, ancestors, arcs, children,
+from .nodes import (add_node, alst, amat, ancestors, arcs, children,
                     compelled_arcs,
                     degree, descendants, directed_arcs, drop_arc, drop_edge,
                     in_degree, incident_arcs, incoming_arcs, isolated_nodes,
                     mb, narcs, nbr, nnodes, out_degree, outgoing_arcs,
                     parents, remove_node, rename_nodes, reverse_arc,
-                    reversible_arcs, set_arc, set_edge, spouses,
+                    reversible_arcs, set_amat, set_arc, set_edge, spouses,
                     undirected_arcs)
 from .strength import (arc_strength, averaged_network, bf_strength,
                        custom_strength, inclusion_threshold)
@@ -98,12 +98,13 @@ __all__ = [
     "random_graph", "perturb", "count_graphs",
     "ordering2blacklist", "set2blacklist", "tiers2blacklist",
     # nodes and arcs
-    "arcs", "alst", "narcs", "nnodes", "parents", "children", "mb", "nbr", "spouses",
+    "arcs", "alst", "amat", "narcs", "nnodes", "parents", "children", "mb",
+    "nbr", "spouses",
     "ancestors", "descendants", "root_nodes", "leaf_nodes", "isolated_nodes",
     "degree", "in_degree", "out_degree",
     "directed_arcs", "undirected_arcs", "incoming_arcs", "outgoing_arcs",
     "incident_arcs", "compelled_arcs", "reversible_arcs",
-    "set_arc", "drop_arc", "reverse_arc", "set_edge", "drop_edge",
+    "set_arc", "drop_arc", "reverse_arc", "set_edge", "drop_edge", "set_amat",
     "add_node", "remove_node", "rename_nodes",
 ]
 
