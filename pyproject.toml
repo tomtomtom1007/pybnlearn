@@ -58,12 +58,25 @@ test-requires = "pytest"
 test-sources = ["tests"]
 # The parity fixtures are committed, so CI checks the numbers against R
 # without needing R installed.
-test-command = "pytest {project}/tests -q"
+#
+# test-sources copies `tests` into a scratch directory and runs the command
+# there, so the path is relative to that copy.  Naming {project} instead
+# would test the source tree rather than the wheel's own copy, which is the
+# thing being tested.
+test-command = "pytest tests -q"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-all = "dnf install -y openblas-devel"
+# manylinux is RHEL-derived and musllinux is Alpine, so the package manager
+# is dnf in one and apk in the other.  The matrix builds both -- ten wheels
+# each per architecture -- and a `dnf install` alone fails every musllinux
+# build before it starts.
+before-all = """
+if command -v dnf >/dev/null 2>&1; then dnf install -y openblas-devel;
+elif command -v apk >/dev/null 2>&1; then apk add openblas-dev;
+else yum install -y openblas-devel; fi
+"""
 
 [tool.cibuildwheel.macos]
 before-all = "brew install openblas"
