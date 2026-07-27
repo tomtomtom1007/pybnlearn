@@ -9,6 +9,17 @@ for Bayesian network structure learning, parameter learning and inference.
 > (x86-64 and aarch64, manylinux and musllinux), macOS arm64 and Windows, and
 > each one runs the whole parity suite before it is kept. Nobody outside this
 > repository has used it yet, so expect the first releases to be alphas.
+>
+> **This is a port, not a drop-in replacement**, and two of the gaps are
+> worth knowing before you start rather than after. Plotting (`graphviz.*`,
+> `strength.plot`, the `bn.fit.*` lattice plots) and the conversions to
+> igraph, gRain, graphNEL and `lm` are **not here at all** — they would be
+> rewrites rather than ports. And `direct_lingam` reproduces R's causal
+> *ordering* exactly but chooses the arcs differently, because R picks them
+> with glmnet's adaptive lasso and glmnet is not vendored: it returns a
+> different structure without complaining, which is the one divergence here
+> that will not announce itself. Both are set out in full
+> [below](#what-works).
 
 ## What makes this a port rather than a reimplementation
 
