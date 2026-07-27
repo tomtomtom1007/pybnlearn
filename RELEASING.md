@@ -2,9 +2,9 @@
 
 ## Before the first release
 
-1. **Push the repository to GitHub.** The URLs in `pyproject.toml` point at
-   `github.com/tomtomtom1007/pybnlearn`; change them if the repository lands
-   somewhere else.
+1. ~~Push the repository to GitHub.~~ Done: it is at
+   <https://github.com/tomtomtom1007/pybnlearn>, and `pyproject.toml` points
+   there.
 
 2. **Register the project on PyPI with Trusted Publishing**, so that no API
    token has to be stored anywhere. On
@@ -22,9 +22,11 @@
    Settings → Environments. Restrict it to tags if you want a second gate.
 
 3. **Decide the version.** `pyproject.toml` currently says `0.1.0.dev0`.
-   Given how much of bnlearn is not ported yet, `0.1.0a1` is a more honest
-   first release than `0.1.0`: PyPI treats it as a pre-release, so `pip
-   install pybnlearn` will not pick it up unless the user asks for it.
+   `0.1.0a1` is still the more honest first release: not because much is
+   missing -- 139 of bnlearn's 160 exports are ported and checked -- but
+   because nobody outside this repository has run it yet, and PyPI treats an
+   alpha as a pre-release, so `pip install pybnlearn` will not pick it up
+   unless somebody asks for it.
 
 ## Cutting a release
 
@@ -40,9 +42,12 @@ git tag v0.1.0a1
 git push origin v0.1.0a1
 ```
 
-The `wheels` workflow builds Linux (x86-64, aarch64) and macOS (x86-64,
-arm64) wheels plus an sdist, runs the test suite inside each wheel, and — only
-for tags starting with `v` — uploads everything to PyPI.
+The `wheels` workflow builds Linux (x86-64 and aarch64, manylinux and
+musllinux), macOS arm64 and Windows x86-64 wheels plus an sdist, runs the
+whole parity suite inside each one, and — only for tags starting with `v` —
+uploads everything to PyPI. A full matrix is thirty wheels and takes about
+fifty minutes; Linux is the long pole, since it builds twice as many as the
+others.
 
 ## Trying it against TestPyPI first
 
@@ -76,30 +81,43 @@ configuration would build.
 
 ## What has actually been verified
 
-Be aware of what is and is not tested, before tagging a release:
+Every wheel below was built in CI and ran the whole parity suite — 8849
+tests — before being kept. Thirty wheels, thirty suite runs.
 
 | | |
 |---|---|
-| macOS arm64 wheel via `python -m build` | built, installed into a clean venv, the whole suite passes |
-| sdist contents | the vendored bnlearn, nmath and LINPACK sources, LICENSE and NOTICE present |
+| **Linux x86-64** | 10 wheels: manylinux_2_28 and musllinux, CPython 3.10–3.14 |
+| **Linux aarch64** | 10 wheels, same spread, on a native ARM runner |
+| **Windows x86-64** | 5 wheels, CPython 3.10–3.14, OpenBLAS vendored in by delvewheel |
+| **macOS arm64** | 5 wheels, CPython 3.10–3.14, linked against Accelerate |
+| **sdist** | builds on a clean Ubuntu with only `libopenblas-dev`, and the suite passes from it |
+| macOS arm64 via `python -m build` | also built locally, installed into a clean venv, suite passes |
 | `twine check` | passes for both artefacts |
-| cibuildwheel configuration | parses; `before-all` runs; the build itself stops locally because cibuildwheel will not install python.org CPython outside CI |
 | C translation of dqrdc2/dqrsl | agrees with the Fortran bit for bit over 60 cases including rank-deficient ones (`tools/check_linpack.sh`) |
-| **Linux wheels** | **never built** — no container runtime was available on the development machine, so `manylinux_2_28` plus the `dnf install openblas-devel` step is unexercised |
-| **macOS x86-64 wheels** | **never built** — no Intel machine |
-| **Windows wheels** | **never built** — no Windows machine; the `scipy-openblas64` and `delvewheel` steps are unexercised |
+| **macOS x86-64** | **not built, and not buildable here** — see below |
 | Trusted Publishing | configuration written, never run |
 
-The first CI run is therefore the real test of the Linux path. Push a tag to a
-scratch repository, or run the workflow with `workflow_dispatch`, before
-tagging anything you intend to publish.
+**macOS x86-64.** `macos-13` was the last Intel image GitHub hosted and it no
+longer schedules: the job sat for fifty-eight minutes with no runner assigned
+while every other job in the same run finished. It is out of the matrix.
+Cross-compiling x86-64 on an arm64 runner would link — Accelerate is a
+universal framework — but the tests cannot run on the wrong architecture, and
+an untested wheel is not what this project ships. Intel Macs build from the
+sdist, which is exercised above.
+
+**Trusted Publishing is the one path still unexercised.** It only runs on a
+`v*` tag, so nothing so far has touched it. Try TestPyPI first (below): a
+version number on PyPI can never be reused, and a misconfigured publisher
+fails after the wheels are built rather than before.
 
 ## Known packaging limitations
 
-* Windows wheels are configured but have never been built. There is no
+* No x86-64 macOS wheels; see above. Intel Macs install from the sdist.
+* Windows has no system BLAS, so the build takes `scipy-openblas32` — the
+  LP64 build, not `-64`, because that one is ILP64 and its integer arguments
+  are eight bytes wide where every declaration here passes `const int *`.
+  Its symbols carry a `scipy_` prefix, which `src/c/compat/blas_names.h`
+  applies; without that the link fails on `dcopy_`, `ddot_` and `daxpy_`.
+* Installing from the sdist needs a C compiler and a BLAS/LAPACK. There is no
   Fortran anywhere any more — R's `dqrdc2` and `dqrsl` are translated to C in
-  `src/c/linpack/` — but Windows has no system BLAS, so the build pulls in the
-  one SciPy ships as a wheel. Expect that step to need iteration on the first
-  CI run.
-* Installing from the sdist needs a C compiler and a BLAS/LAPACK. gfortran is
-  no longer required.
+  `src/c/linpack/` — so gfortran is not required.

@@ -5,10 +5,10 @@ for Bayesian network structure learning, parameter learning and inference.
 
 > **Status: pre-release.** 139 of bnlearn's 160 exported functions are ported
 > and checked against R — see [What works](#what-works) and
-> [Verified against R](#verified-against-r). macOS wheels build in CI and pass
-> the full suite; Linux wheels build on x86-64 and aarch64 and pass it too.
-> Windows is the one platform still being brought up. Expect the first
-> releases to be alphas.
+> [Verified against R](#verified-against-r). Wheels build in CI for Linux
+> (x86-64 and aarch64, manylinux and musllinux), macOS arm64 and Windows, and
+> each one runs the whole parity suite before it is kept. Nobody outside this
+> repository has used it yet, so expect the first releases to be alphas.
 
 ## What makes this a port rather than a reimplementation
 

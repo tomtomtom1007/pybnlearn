@@ -84,8 +84,13 @@ elif command -v apk >/dev/null 2>&1; then apk add openblas-dev;
 else yum install -y openblas-devel; fi
 """
 
+# No before-all: macOS needs no BLAS installed.  meson finds Accelerate
+# through its framework method, which is what every macOS build here has
+# actually linked -- the `brew install openblas` that used to be on this line
+# was never used, and Homebrew said so itself in the CI log ("because macOS
+# provides BLAS in Accelerate.framework").  Dropping it removes a step that
+# cost time and suggested a dependency that does not exist.
 [tool.cibuildwheel.macos]
-before-all = "brew install openblas"
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 
 # Windows has no system BLAS, so the build takes the one SciPy ships as a
