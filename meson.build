@@ -9,6 +9,30 @@ project(
 
 py = import('python').find_installation(pure: false)
 
+# An implicit declaration is assumed to return int, so on a 64-bit target the
+# pointer a function actually returned is truncated to 32 bits and silently
+# stored.  That is not a style problem: it is how the first Linux run
+# segfaulted, from a strdup() that glibc hides in strict ANSI mode while
+# macOS declares regardless.  Newer compilers reject it, older ones only
+# warn, and the difference between those two is the difference between a
+# build failure and a corrupted pointer -- so make it an error everywhere
+# rather than wait for the toolchain to decide.
+cc = meson.get_compiler('c')
+if cc.has_argument('-Werror=implicit-function-declaration')
+  add_project_arguments('-Werror=implicit-function-declaration', language: 'c')
+endif
+
+# And stop glibc hiding the POSIX surface in the first place.  c_std=c11 puts
+# it in strict ANSI mode, where strdup, strcasecmp and friends are simply not
+# declared -- which is what produced the truncation above.  _DEFAULT_SOURCE is
+# what gcc itself defines at -std=gnu11; it only adds declarations, and it is
+# glibc-specific, so it is inert on macOS and Windows.  Belt and braces with
+# the flag above: this prevents the class, that one catches whatever slips
+# through.
+if host_machine.system() == 'linux'
+  add_project_arguments('-D_DEFAULT_SOURCE', language: 'c')
+endif
+
 incdir_numpy = run_command(
   py, ['-c', 'import numpy; print(numpy.get_include())'],
   check: true,

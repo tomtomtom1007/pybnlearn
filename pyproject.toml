@@ -6,6 +6,12 @@ requires = [
     "ninja",
     "Cython>=3.0",
     "numpy>=1.25",
+    # Windows has no system BLAS.  It has to be here rather than only in
+    # cibuildwheel's before-build, because meson runs inside the isolated
+    # build environment that `python -m build` creates, and that environment
+    # is built from this list alone -- installing the package outside it
+    # leaves meson unable to import it.
+    "scipy-openblas64; sys_platform == 'win32'",
 ]
 
 [project]

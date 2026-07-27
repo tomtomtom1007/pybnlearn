@@ -7,6 +7,37 @@
 #include "rcompat.h"
 #include "rcompat_internal.h"
 
+/* strdup() is POSIX, not ISO C, and glibc hides it when the compiler is put
+ * into strict ANSI mode -- which building at c_std=c11 does.  Left implicit
+ * it is assumed to return int, so the heap pointer it actually returns is
+ * truncated to 32 bits before being stored: the string is unreachable and
+ * the next read of it dereferences a mangled address.
+ *
+ * That is not hypothetical.  It is why the first Linux run segfaulted inside
+ * Rf_install's strcmp over the symbol table, while the same source built and
+ * ran cleanly on macOS, whose headers declare strdup regardless of the
+ * standard.  A newer gcc rejects the implicit declaration outright and a
+ * slightly older one only warns, so the same mistake showed up as a build
+ * failure on manylinux and as a runtime crash from the sdist.
+ *
+ * Written out here rather than unlocked with a feature-test macro because
+ * this is four lines, needs no per-platform reasoning, and does not rely on
+ * anyone remembering to set _DEFAULT_SOURCE in a second build system.
+ */
+static char *pybn_strdup(const char *s) {
+
+size_t n = strlen(s) + 1;
+char *out = malloc(n);
+
+  if (!out)
+    return NULL;
+
+  memcpy(out, s, n);
+
+  return out;
+
+}/*PYBN_STRDUP*/
+
 /* -------------------------------------------------------------------------
  * the arena.
  *
@@ -188,7 +219,7 @@ SEXP s = NULL;
   s->sxptype = SYMSXP;
   s->len = 1;
   s->preserved = 1;
-  s->u.c = strdup(name);
+  s->u.c = pybn_strdup(name);
 
   symbol_table[nsymbols++] = s;
 
@@ -227,7 +258,7 @@ static int done = 0;
   R_NaString->sxptype = CHARSXP;
   R_NaString->len = 2;
   R_NaString->preserved = 1;
-  R_NaString->u.c = strdup("NA");
+  R_NaString->u.c = pybn_strdup("NA");
 
   done = 1;
 
@@ -437,7 +468,7 @@ SEXP Rf_mkChar(const char *s) {
 
 SEXP c = new_sexp(CHARSXP, s ? (int)strlen(s) : 0);
 
-  c->u.c = strdup(s ? s : "");
+  c->u.c = pybn_strdup(s ? s : "");
 
   if (!c->u.c)
     Rf_error("unable to allocate a string.");

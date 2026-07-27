@@ -64,6 +64,15 @@ echo "building the parity harness ..."
 cc $CFLAGS $BN_INC -o "$OUT/harness_citest" \
   tests/parity/harness_citest.c "$OUT"/*.o $BLAS -lm
 
+# The adjacency-matrix harness exists to be run under a sanitizer:
+#   CFLAGS="-O1 -g -std=c11 -fPIC -w -fsanitize=address" tools/build_core.sh
+# A write just outside an allocation is invisible wherever the allocator
+# leaves slack, which is how a truncated pointer reached Linux and nowhere
+# else.
+cc $CFLAGS $BN_INC -o "$OUT/harness_amat" \
+  tests/parity/harness_amat.c "$OUT"/*.o $BLAS -lm
+"$OUT/harness_amat"
+
 if [ -f tests/parity/fixtures/learning.test.csv ]; then
   echo
   echo "conditional independence tests (compare with tools/gen_r_fixtures.R):"
