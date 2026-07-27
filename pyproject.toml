@@ -41,8 +41,8 @@ dependencies = [
 test = ["pytest>=7.0"]
 
 [project.urls]
-Homepage = "https://github.com/tommatsuda/pybnlearn"
-Issues = "https://github.com/tommatsuda/pybnlearn/issues"
+Homepage = "https://github.com/tomtomtom1007/pybnlearn"
+Issues = "https://github.com/tomtomtom1007/pybnlearn/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

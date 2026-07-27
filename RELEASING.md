@@ -3,7 +3,7 @@
 ## Before the first release
 
 1. **Push the repository to GitHub.** The URLs in `pyproject.toml` point at
-   `github.com/tommatsuda/pybnlearn`; change them if the repository lands
+   `github.com/tomtomtom1007/pybnlearn`; change them if the repository lands
    somewhere else.
 
 2. **Register the project on PyPI with Trusted Publishing**, so that no API

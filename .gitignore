@@ -24,6 +24,8 @@ vendor/
 # The parity fixtures ARE tracked: they are what lets CI check results against
 # R without having R installed. Regenerate with tools/gen_r_fixtures.R.
 
-# local editor and tool state
-.claude/settings.local.json
+# local editor and tool state.  The whole directory, not just the settings:
+# agent worktrees live under .claude/worktrees/ and each is a full copy of
+# the repository.
+.claude/
 .DS_Store
