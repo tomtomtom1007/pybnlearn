@@ -24,6 +24,8 @@ from ._core import (collider_triples, complement_arcs, consistent_extension,
                     intervention_distance, ordered_graphs, sample_indices)
 from ._core import acyclic as _acyclic
 from ._core import path_exists as _path_exists
+from ._validate import (check_node_labels, check_positive_integer,
+                        is_non_negative_integer, is_number, is_probability)
 from .structure import BayesianNetwork, _data_type, build_blacklist
 
 __all__ = [
@@ -47,7 +49,7 @@ def _match_nodes(a, b):
 
 def empty_graph(nodes):
     """A graph with the given nodes and no arcs."""
-    return BayesianNetwork([str(n) for n in nodes], [])
+    return BayesianNetwork(check_node_labels(nodes), [])
 
 
 def cpdag(net, wlbl=False):
@@ -168,6 +170,17 @@ def nparams(net, data=None, estimator=None):
         raise ValueError(
             "counting the parameters of a structure needs the data: how many "
             "a node costs depends on how many levels its variables have")
+    # The count is per node, and a node the data do not have has no levels
+    # to count: the C code reads whatever column happens to be at that index
+    # and returns a number anyway.
+    columns = [str(c) for c in data.columns]
+    if set(columns) != set(net.nodes):
+        if len(net.nodes) != len(columns):
+            raise ValueError(
+                "the network and the data have different numbers of "
+                f"variables: {len(net.nodes)} and {len(columns)}")
+        raise ValueError("the network and the data have different variables")
+
     if estimator is None:
         estimator = "bic" if _data_type(data) == "discrete" else "bic-g"
     # the C counts into a double; a count is an integer, as R's is.
@@ -203,7 +216,7 @@ def _node_parameters(node):
 
 def subgraph(net, nodes):
     """The subgraph spanning a subset of the nodes."""
-    nodes = [str(n) for n in nodes]
+    nodes = check_node_labels(nodes)
     unknown = set(nodes) - set(net.nodes)
     if unknown:
         raise ValueError("unknown node(s): " + ", ".join(sorted(unknown)))
@@ -239,6 +252,15 @@ def model2network(modelstring):
 
     if len(set(nodes)) != len(nodes):
         raise ValueError(f"model string declares a node twice: {modelstring!r}")
+
+    # "[A|A]" makes a node its own parent.  Nothing downstream can represent
+    # that -- the node would have to be conditioned on itself -- so it is
+    # refused here rather than left to produce a graph whose adjacency matrix
+    # has a one on the diagonal.
+    loops = sorted({a for a, b in arcs if a == b})
+    if loops:
+        raise ValueError("invalid arcs that are actually loops: "
+                         + ", ".join(f"{n} -> {n}" for n in loops))
 
     # "[A|B][B|A]" declares A a parent of B and B a parent of A, which is how
     # an *undirected* arc is held -- so the string describes a graph a model
@@ -697,7 +719,7 @@ def sid(learned, true):
 
 def complete_graph(nodes):
     """The DAG with every arc the node ordering allows."""
-    nodes = [str(n) for n in nodes]
+    nodes = check_node_labels(nodes)
     return BayesianNetwork(nodes, tier_blacklist(list(reversed(nodes))),
                            {"algo": "complete"})
 
@@ -716,10 +738,8 @@ def random_graph(nodes, num=1, method="ordered", prob=None, burn_in=None,
     Seed with `set_seed()`; the draws come from R's generator, so the same
     seed gives the same graphs R gives.
     """
-    nodes = [str(n) for n in nodes]
-    num = int(num)
-    if num < 1:
-        raise ValueError("the number of graphs must be a positive integer")
+    nodes = check_node_labels(nodes)
+    num = check_positive_integer(num, "the number of graphs to generate")
 
     if method == "empty":
         return _one_or_many([[] for _ in range(num)], nodes, method)
@@ -728,8 +748,9 @@ def random_graph(nodes, num=1, method="ordered", prob=None, burn_in=None,
         if prob is None:
             # this default gives about as many arcs as there are nodes.
             prob = 2 / (len(nodes) - 1) if len(nodes) > 1 else 0.0
-        if not 0 <= prob <= 1:
-            raise ValueError("the branching probability must be in [0, 1]")
+        if not is_probability(prob):
+            raise ValueError(
+                "the branching probability must be a numeric value in [0,1]")
         return _one_or_many(ordered_graphs(nodes, num, float(prob)), nodes,
                             method)
 
@@ -737,15 +758,23 @@ def random_graph(nodes, num=1, method="ordered", prob=None, burn_in=None,
         raise ValueError(
             "method must be 'ordered', 'ic-dag', 'melancon' or 'empty'")
 
-    if burn_in is None:
-        # the magic number comes from the reference implementation.
-        burn_in = 6 * len(nodes) ** 2
-    every = int(every)
-    if every < 1:
-        raise ValueError("the thinning factor must be a positive integer")
+    # the magic number for the default burn-in comes from the reference
+    # implementation of Ide-Cozman.
+    burn_in = check_positive_integer(burn_in, "the burn in length",
+                                     default=6 * len(nodes) ** 2)
+    every = check_positive_integer(every, "'every'")
+
+    # A degree bound of zero asks for a graph with no arcs at all while still
+    # running the chain, so it comes back looking sampled; R refuses it.
+    max_in_degree = check_positive_integer(
+        max_in_degree, "the maximum in-degree", allow_infinite=True)
+    max_out_degree = check_positive_integer(
+        max_out_degree, "the maximum out-degree", allow_infinite=True)
+    max_degree = check_positive_integer(
+        max_degree, "the maximum degree", allow_infinite=True)
 
     generated = ide_cozman_graphs(
-        nodes, num * every, int(burn_in), float(max_in_degree),
+        nodes, num * every, burn_in, float(max_in_degree),
         float(max_out_degree), float(max_degree), method == "ic-dag")
 
     if every > 1:
@@ -917,7 +946,14 @@ def count_graphs(type="all-dags", nodes=None, k=None, r=None, eqclass=None):
 
     if nodes is None:
         raise ValueError("this count needs the number of nodes")
-    wanted = [nodes] if isinstance(nodes, int) else [int(n) for n in nodes]
+    # R truncates a fractional count on the way into C rather than refusing
+    # it, so 2.5 nodes means 2; what it does refuse is zero or fewer, which
+    # would otherwise index off the front of the table of counts.
+    wanted = [nodes] if is_number(nodes) else [int(n) for n in nodes]
+    wanted = [int(n) for n in wanted]
+    if any(n < 1 for n in wanted):
+        raise ValueError("'nodes' must be positive integers, the number(s) "
+                         "of nodes in the graph")
     biggest = max(wanted)
 
     if type == "dags-given-ordering":
@@ -929,10 +965,13 @@ def count_graphs(type="all-dags", nodes=None, k=None, r=None, eqclass=None):
     elif type == "dags-with-k-roots":
         if k is None:
             raise ValueError("this count needs the number of roots")
-        counts = _count_by_roots(biggest, int(k))
+        counts = _count_by_roots(
+            biggest, check_positive_integer(k, "the number of root nodes"))
     elif type == "dags-with-r-arcs":
         if r is None:
             raise ValueError("this count needs the number of arcs")
+        if not is_non_negative_integer(r):
+            raise ValueError("the number of arcs must be a positive integer")
         counts = _count_by_arcs(biggest, int(r))
     else:
         raise ValueError(f"unknown count {type!r}")

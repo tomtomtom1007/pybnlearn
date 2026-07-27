@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from ._core import Search, Tester, averaged_arcs, which_arcs_undirected
+from ._validate import check_node_labels, check_probability
 from .structure import (BayesianNetwork, _check_complete, _check_score,
                         _check_score_args, _data_type)
 
@@ -73,7 +74,13 @@ def arc_strength(network, data, criterion=None, alpha=0.05, **extra_args):
 
     nodes = [str(c) for c in data.columns]
     if set(nodes) != set(network.nodes):
+        if len(network.nodes) != len(nodes):
+            raise ValueError(
+                "the network and the data have different numbers of "
+                f"variables: {len(network.nodes)} and {len(nodes)}")
         raise ValueError("the network and the data have different variables")
+
+    alpha = check_probability(alpha, "alpha")
 
     undirected = _undirected(network)
     if undirected:
@@ -193,7 +200,18 @@ def custom_strength(networks, nodes=None, weights=None, cpdag=True):
 
     if nodes is None:
         nodes = _nodes_of(networks[0])
-    nodes = [str(v) for v in nodes]
+    nodes = check_node_labels(nodes)
+
+    # Every network has to be over the same nodes, or the counts are not
+    # counts of the same thing: a network missing a node contributes a zero
+    # to every arc that touches it, which is indistinguishable from a network
+    # that considered the arc and left it out.
+    for i, network in enumerate(networks):
+        # a bare arc list carries no node set of its own, so there is nothing
+        # to disagree with; it is interpreted against `nodes` below.
+        if hasattr(network, "nodes") and set(network.nodes) != set(nodes):
+            raise ValueError(f"network {i} is over different nodes: "
+                             + ", ".join(sorted(network.nodes)))
 
     if weights is None:
         weights = np.ones(len(networks))
@@ -273,9 +291,7 @@ def averaged_network(strength, threshold=None):
         threshold = strength.attrs.get("threshold")
         if threshold is None:
             threshold = inclusion_threshold(strength)
-    threshold = float(threshold)
-    if not 0 <= threshold <= 1:
-        raise ValueError("the threshold must be between 0 and 1")
+    threshold = check_probability(threshold, "the threshold")
 
     nodes = list(strength.attrs.get("nodes")
                  or sorted(set(strength["from"]) | set(strength["to"])))

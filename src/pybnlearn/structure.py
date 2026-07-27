@@ -25,6 +25,7 @@ import pandas as pd
 from ._core import (Search, alpha_star_value, reset_test_counter,
                     test_counter, topological_order)
 from ._core import acyclic as _acyclic
+from ._validate import check_positive, check_positive_integer
 
 __all__ = ["BF", "BayesianNetwork", "alpha_star", "blacklist", "hc",
            "ntests", "score", "tabu", "whitelist"]
@@ -203,6 +204,34 @@ def _check_complete(data):
             + (", ..." if len(unbounded) > 5 else ""))
 
 
+def _check_frame(data, label="the data"):
+    """check.data(): the shape and the levels, before anything reads a value.
+
+    An empty frame is what a filter that matched nothing leaves behind, and
+    every search over it terminates immediately with the empty network -- a
+    result, not an error, and one that says nothing about the data that were
+    filtered.  A single-level factor is the same failure in miniature: its
+    contingency tables have no degrees of freedom left, so no arc into it can
+    ever pay for itself and it comes back isolated as though the data had
+    said so.
+    """
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas DataFrame")
+    if data.shape[1] == 0:
+        raise ValueError(f"{label} must have at least one column")
+    if len(data) == 0:
+        raise ValueError(f"{label} contain no observations")
+
+    flat = [str(c) for c in data.columns
+            if is_discrete_column(data[c])
+            and len(data[c].cat.categories
+                    if isinstance(data[c].dtype, pd.CategoricalDtype)
+                    else data[c].unique()) < 2]
+    if flat:
+        raise ValueError(
+            f"variable {flat[0]} in {label} must have at least two levels")
+
+
 def _check_maxp(maxp):
     """check.maxp(): the parent limit has to leave room for a parent.
 
@@ -210,14 +239,19 @@ def _check_maxp(maxp):
     the empty network -- it is a request that cannot be met, and returning
     the empty network for it would look like a result.
     """
-    if maxp is None or maxp == float("inf"):
-        return float("inf")
-    if isinstance(maxp, float) and not maxp.is_integer():
-        raise ValueError("maxp must be a positive integer number")
-    maxp = int(maxp)
-    if maxp < 1:
-        raise ValueError("maxp must be a positive integer number")
-    return maxp
+    return check_positive_integer(maxp, "maxp", default=math.inf,
+                                  allow_infinite=True)
+
+
+def _check_max_iter(max_iter):
+    """check.max.iter(): the same argument as maxp, one level up.
+
+    Zero iterations is a search that is not allowed to take a single step, so
+    it returns whatever it started from -- the empty network, or the caller's
+    own start= network handed straight back.  Both look like convergence.
+    """
+    return check_positive_integer(max_iter, "the maximum number of iterations",
+                                  default=math.inf, allow_infinite=True)
 
 
 def _check_start(start, nodes):
@@ -265,6 +299,17 @@ def check_whitelist(whitelist, nodes, score_based):
     if unknown:
         raise ValueError("unknown node(s) in the whitelist: "
                          + ", ".join(sorted(unknown)))
+
+    # A self-loop is not a constraint, it is a typo -- usually a row index off
+    # by one when a whitelist is built from a table.  bnlearn refuses loops
+    # everywhere it calls check.arcs() and simply forgets to here, so R
+    # carries the loop into the search, where it does not change the arcs but
+    # does shift the topological ordering the model string is written in.
+    # Refusing it is what the rest of bnlearn does with the same input.
+    loops = sorted({a for a, b in whitelist if a == b})
+    if loops:
+        raise ValueError("invalid arcs that are actually loops: "
+                         + ", ".join(f"{n} -> {n}" for n in loops))
 
     if score_based:
         both = sorted({tuple(sorted(a)) for a in whitelist
@@ -344,9 +389,12 @@ def _check_score_args(score, data, extra_args):
     out = {}
 
     if "k" in accepted:
-        # check.penalty(): AIC penalises by 1, BIC by log(n)/2.
+        # check.penalty(): AIC penalises by 1, BIC by log(n)/2.  A penalty of
+        # zero or less is not a weaker penalty, it is a reward for parameters:
+        # the search then adds every arc it is allowed and returns a network
+        # as dense as maxp permits, which reads as a strong finding.
         if "k" in extra_args:
-            out["k"] = float(extra_args["k"])
+            out["k"] = check_positive(extra_args["k"], "the penalty weight")
         elif score.startswith("aic"):
             out["k"] = 1.0
         else:
@@ -367,13 +415,20 @@ def _check_score_args(score, data, extra_args):
             out["beta"] = beta
 
     if "iss" in accepted:
-        # check.iss(): the de facto standard imaginary sample size is 1.
-        out["iss"] = float(extra_args.get("iss", 1))
+        # check.iss(): the de facto standard imaginary sample size is 1.  It
+        # is the weight of the Dirichlet prior, so zero or less makes the
+        # prior counts non-positive and the Bayesian score a ratio of gamma
+        # functions evaluated outside their domain -- which returns a number.
+        out["iss"] = check_positive(
+            extra_args.get("iss"), "the imaginary sample size", default=1.0)
 
     if "iss.mu" in accepted:
-        out["iss.mu"] = float(extra_args.get("iss.mu", 1))
+        out["iss.mu"] = check_positive(
+            extra_args.get("iss.mu"), "the imaginary sample size", default=1.0)
     if "iss.w" in accepted:
-        out["iss.w"] = float(extra_args.get("iss.w", data.shape[1] + 2))
+        out["iss.w"] = check_positive(
+            extra_args.get("iss.w"), "the imaginary sample size",
+            default=float(data.shape[1] + 2))
     if "nu" in accepted:
         # check.nu(): the prior mean vector defaults to the column means, and
         # keeps the variable names -- the C side looks nu up by name.
@@ -543,10 +598,15 @@ def score(network, data, type=None, by_node=False, **extra_args):
     by_node : bool
         Return each node's contribution instead of the total.
     """
+    _check_frame(data)
     _check_complete(data)
 
     nodes = [str(c) for c in data.columns]
     if set(nodes) != set(network.nodes):
+        if len(network.nodes) != len(nodes):
+            raise ValueError(
+                "the network and the data have different numbers of "
+                f"variables: {len(network.nodes)} and {len(nodes)}")
         raise ValueError("the network and the data have different variables")
 
     # R reuses the score and its hyperparameters from the bn object when they
@@ -603,19 +663,20 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
     -------
     BayesianNetwork
     """
-    if not isinstance(data, pd.DataFrame):
-        raise TypeError("data must be a pandas DataFrame")
-    if data.shape[1] < 2:
-        raise ValueError("at least two variables are needed")
-    restart = int(restart)
-    if restart < 0:
-        raise ValueError("restart must be a non-negative integer")
-    perturb = int(perturb)
-    if restart and perturb < 1:
-        raise ValueError("perturb must be a positive integer")
+    _check_frame(data)
+
+    # check.restart() short-circuits on zero before it checks anything, so no
+    # restarts is the default rather than a degenerate request; check.perturb()
+    # is not excused the same way, and zero changes per restart would make
+    # every restart a no-op.
+    restart = 0 if not restart else check_positive_integer(
+        restart, "the number of random restarts")
+    perturb = check_positive_integer(
+        perturb, "the number of changes at each random restart")
 
     _check_complete(data)
     maxp = _check_maxp(maxp)
+    max_iter = _check_max_iter(max_iter)
 
     nodes = [str(c) for c in data.columns]
     n = len(nodes)
@@ -849,17 +910,13 @@ def tabu(data, start=None, whitelist=None, blacklist=None, score=None,
     -------
     BayesianNetwork
     """
-    if not isinstance(data, pd.DataFrame):
-        raise TypeError("data must be a pandas DataFrame")
-    if data.shape[1] < 2:
-        raise ValueError("at least two variables are needed")
-    if int(tabu) < 1:
-        raise ValueError("the tabu list must have at least one slot")
+    _check_frame(data)
 
     _check_complete(data)
     maxp = _check_maxp(maxp)
+    max_iter = _check_max_iter(max_iter)
 
-    tabu = int(tabu)
+    tabu = check_positive_integer(tabu, "the length of the tabu list")
     nodes = [str(c) for c in data.columns]
     n = len(nodes)
     index = {node: i for i, node in enumerate(nodes)}
@@ -1010,10 +1067,15 @@ def alpha_star(network, data):
     A BDe score needs one, and the usual answer is to pick a small number and
     hope; this computes the one that fits the data at hand.
     """
+    _check_frame(data)
     _check_complete(data)
 
     nodes = [str(c) for c in data.columns]
     if set(nodes) != set(network.nodes):
+        if len(network.nodes) != len(nodes):
+            raise ValueError(
+                "the network and the data have different numbers of "
+                f"variables: {len(network.nodes)} and {len(nodes)}")
         raise ValueError("the network and the data have different variables")
     if _data_type(data) != "discrete":
         raise ValueError("alpha_star() needs discrete data")

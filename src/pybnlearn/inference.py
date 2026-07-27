@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from ._core import random_sample, set_seed, weighted_sample
+from ._validate import check_positive_integer
 from .fit import FittedNetwork
 
 __all__ = ["cpdist", "cpquery", "rbn", "set_seed"]
@@ -144,10 +145,9 @@ def rbn(fitted, n=1):
     """
     if not isinstance(fitted, FittedNetwork):
         raise TypeError("rbn() needs a fitted network; call fit() first")
-    if int(n) < 1:
-        raise ValueError("n must be a positive integer")
+    n = check_positive_integer(n, "the number of observations to be generated")
 
-    return _as_frame(random_sample(fitted, int(n)))
+    return _as_frame(random_sample(fitted, n))
 
 
 def cpdist(fitted, nodes, evidence=None, method="lw", n=None, batch=None):
@@ -192,7 +192,8 @@ def cpdist(fitted, nodes, evidence=None, method="lw", n=None, batch=None):
             "single values; use method='ls' for anything else")
 
     reduced = _reduce(fitted, {node: True for node in nodes}, evidence)
-    n = int(n) if n is not None else _default_particles(reduced)
+    n = (_default_particles(reduced) if n is None else
+         check_positive_integer(n, "the number of observations to be sampled"))
 
     if method == "lw":
         columns, weights = weighted_sample(reduced, nodes, n, fix=evidence)
@@ -225,7 +226,8 @@ def cpquery(fitted, event, evidence=None, method="ls", n=None, batch=None):
             "single values; use method='ls' for anything else")
 
     reduced = _reduce(fitted, event, evidence)
-    n = int(n) if n is not None else _default_particles(reduced)
+    n = (_default_particles(reduced) if n is None else
+         check_positive_integer(n, "the number of observations to be sampled"))
     batch = int(batch) if batch is not None else min(n, 10 ** 4)
 
     if method == "ls":

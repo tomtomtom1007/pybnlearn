@@ -17,6 +17,7 @@ import pandas as pd
 from ._core import (arc_strength_coefficients, arc_strength_counters,
                     consistent_extension, cpdag_arcs, network_loglikelihood,
                     sample_indices)
+from ._validate import check_positive_integer, is_positive_integer
 from . import constraint, graph, hybrid, structure
 from .fit import DiscreteNode, fit, predict
 from .structure import BayesianNetwork, _check_complete
@@ -83,14 +84,11 @@ def boot_strength(data, algorithm="hc", replicates=200, m=None,
 
     _check_complete(data)
 
-    replicates = int(replicates)
-    if replicates < 1:
-        raise ValueError("replicates must be a positive integer")
+    replicates = check_positive_integer(
+        replicates, "the number of bootstrap replicates")
 
     nrow, ncol = data.shape
-    m = nrow if m is None else int(m)
-    if not 0 < m <= nrow:
-        raise ValueError("m must be between 1 and the number of rows")
+    m = check_positive_integer(m, "bootstrap sample size", default=nrow)
 
     nodes = [str(c) for c in data.columns]
     learn = _ALGORITHMS[algorithm]
@@ -175,6 +173,80 @@ class CrossValidation:
                 f"method={self.method!r}, mean={self.mean:.6g})")
 
 
+def _check_cv_splits(k, n, method):
+    """check.cv.splits(): three separate boundaries, and the third is the one
+    a caller trips over by accident.
+
+    Ten-fold cross-validation on eight observations is a plausible thing to
+    ask for and an impossible thing to do; leaving it unchecked gives folds
+    that are empty, a model fitted on everything, and a loss that looks
+    respectable because it was measured on nothing.  One fold is the same
+    problem stated differently -- there is no held-out set at all.
+    """
+    if method not in ("k-fold", "hold-out"):
+        # the custom-folds path partitions the data itself.
+        return k if k is None else int(k)
+
+    if k is None:
+        return min(10, n)
+    if not is_positive_integer(k):
+        raise ValueError("the number of splits must be a positive integer "
+                         "number")
+    k = int(k)
+    if k == 1 and method == "k-fold":
+        raise ValueError("the number of splits must be at least 2")
+    if method == "k-fold" and n < k:
+        raise ValueError(f"insufficient sample size for {k} subsets")
+    return k
+
+
+def _check_holdout_size(m, n):
+    """check.cv.holdout.size(): the test subset has to leave a training set
+    behind, so it is strictly smaller than the data."""
+    if m is None:
+        return -(-n // 10)
+    if not is_positive_integer(m):
+        raise ValueError("the size of the test subset must be a positive "
+                         "integer number")
+    if int(m) >= n:
+        raise ValueError(
+            f"insufficient sample size for a test subset of size {int(m)}")
+    return int(m)
+
+
+def _check_folds(folds, n):
+    """check.cv.folds(): a partition, and all of one.
+
+    Folds that overlap score some observations twice and folds that leave
+    observations out score them never; either way the mean loss is over a
+    different data set from the one that was passed in, and nothing about
+    the result says so.
+    """
+    if not folds:
+        raise ValueError("method='custom-folds' needs the folds")
+
+    prepared = [np.asarray(f, dtype=np.int64).ravel() for f in folds]
+    if len(prepared) < 2:
+        raise ValueError("at least two folds are needed")
+    if any(len(f) == 0 for f in prepared):
+        raise ValueError("some folds contain no observations")
+
+    merged = np.concatenate(prepared)
+    if (merged < 1).any():
+        raise ValueError("observation indices must be positive integer "
+                         "numbers")
+    if len(np.unique(merged)) != len(merged):
+        raise ValueError("some observations are included in more than one "
+                         "fold")
+    if merged.max() > n:
+        raise ValueError(
+            f"observation indices are too high (sample size is {n})")
+    if len(merged) != n:
+        raise ValueError("not all observations are assigned to a fold")
+
+    return prepared
+
+
 def _folds(n, k, m, method, folds):
     """The same partitions R draws, in the same order.
 
@@ -182,9 +254,7 @@ def _folds(n, k, m, method, folds):
     the draws is part of the result, not an implementation detail.
     """
     if method == "custom-folds":
-        if not folds:
-            raise ValueError("method='custom-folds' needs the folds")
-        return [np.asarray(f, dtype=np.int64) for f in folds]
+        return _check_folds(folds, n)
 
     if method == "k-fold":
         # split(sample(n), seq_len(k)): a permutation dealt round-robin into
@@ -341,8 +411,8 @@ def bn_cv(data, bn, loss=None, k=10, m=None, method="k-fold", folds=None,
         raise ValueError(f"the {loss!r} loss needs a target node")
 
     n = len(data)
-    k = int(k)
-    m = int(m) if m is not None else -(-n // 10)
+    k = _check_cv_splits(k, n, method)
+    m = _check_holdout_size(m, n)
 
     if isinstance(bn, str) and bn not in _ALGORITHMS:
         raise ValueError(
@@ -460,14 +530,11 @@ def bn_boot(data, statistic, replicates=200, m=None, algorithm="hc",
     if not callable(statistic):
         raise TypeError("statistic must be callable")
 
-    replicates = int(replicates)
-    if replicates < 1:
-        raise ValueError("replicates must be a positive integer")
+    replicates = check_positive_integer(
+        replicates, "the number of bootstrap replicates")
 
     nrow = len(data)
-    m = nrow if m is None else int(m)
-    if not 0 < m <= nrow:
-        raise ValueError("m must be between 1 and the number of rows")
+    m = check_positive_integer(m, "bootstrap sample size", default=nrow)
 
     learn = _ALGORITHMS[algorithm]
 

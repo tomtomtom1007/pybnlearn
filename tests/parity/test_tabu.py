@@ -88,5 +88,8 @@ def test_suite_exercises_tabu():
 
 
 def test_tabu_list_size_is_validated(datasets):
-    with pytest.raises(ValueError, match="at least one slot"):
+    """A tabu list with no slots is a tabu search that cannot remember
+    anything, so it walks straight back into the local maximum it just left;
+    R refuses it, in check.tabu()'s wording, which is what is matched here."""
+    with pytest.raises(ValueError, match="tabu list must be a positive"):
         pybnlearn.tabu(datasets["learning.test"], tabu=0)

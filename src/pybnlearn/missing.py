@@ -25,6 +25,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ._validate import check_positive_integer
 from .fit import DiscreteNode, FittedNetwork, GaussianNode, fit
 
 __all__ = ["impute", "structural_em"]
@@ -73,7 +74,10 @@ def impute(fitted, data, method="bayes-lw", n=500, strict=True):
     if method == "parents":
         imputed = _impute_from_parents(fitted, data)
     elif method == "bayes-lw":
-        imputed = _impute_by_weighting(fitted, data, int(n))
+        imputed = _impute_by_weighting(
+            fitted, data,
+            check_positive_integer(
+                n, "the number of observations to be sampled"))
     else:
         imputed = _impute_exactly(fitted, data)
 

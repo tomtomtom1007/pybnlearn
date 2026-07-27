@@ -28,8 +28,9 @@ import pandas as pd
 from ._core import (Tester, cpdag_arcs, neighbourhoods,
                     recover_structure)
 from ._core import reset_test_counter, test_counter
+from ._validate import check_positive_integer, is_probability
 from .structure import (BayesianNetwork, _check_complete, _data_type,
-                        check_whitelist,
+                        _check_frame, check_whitelist,
                         build_blacklist)
 
 __all__ = ["fast_iamb", "gs", "hpc", "iamb", "iamb_fdr", "inter_iamb",
@@ -38,6 +39,39 @@ __all__ = ["fast_iamb", "gs", "hpc", "iamb", "iamb_fdr", "inter_iamb",
 
 _DISCRETE_TESTS = {"mi", "mi-adf", "mi-sh", "x2", "x2-adf"}
 _CONTINUOUS_TESTS = {"cor", "zf", "mi-g", "mi-g-sh"}
+
+
+def _check_alpha(alpha):
+    """check.alpha(): a probability, with both ends of the interval included.
+
+    R admits 0 and 1, and both mean something -- a test at alpha = 0 rejects
+    no null hypothesis and returns the empty graph, one at alpha = 1 rejects
+    every one and returns the complete graph.  They are extreme answers, not
+    invalid questions, and refusing them would refuse calls R runs.
+
+    What is refused is anything outside that: a percentage written as 5, a
+    negative significance level, a vector of two.  Left unchecked those do
+    not fail, they just make every comparison against the p-value go the
+    same way, and the graph that comes back is the empty or the complete one
+    with nothing to say it was not learned.
+    """
+    if alpha is None or not is_probability(alpha):
+        raise ValueError("alpha must be a numerical value in [0,1]")
+    return float(alpha)
+
+
+def _check_max_sx(max_sx, nnodes):
+    """check.largest.sx.set(): the bound on the conditioning set.
+
+    Infinity is the default and means no bound.  Zero is not a smaller bound
+    but a different algorithm -- marginal independence only -- and R will not
+    take it; a fractional one is a typo that would otherwise be truncated
+    into a working, wrong limit.  A bound above the node count is legal and
+    simply never binds.
+    """
+    max_sx = check_positive_integer(max_sx, "max.sx", default=nnodes,
+                                    allow_infinite=True)
+    return nnodes if max_sx > nnodes else max_sx
 
 
 def _check_test(test, data):
@@ -624,18 +658,14 @@ def _constraint_learn(data, blanket_fn, algorithm, whitelist, blacklist,
                       test, alpha, max_sx, undirected,
                       markov_blankets=True, empty_dsep=True,
                       skeleton_fn=None, structure_fn=None):
+    _check_frame(data)
     _check_complete(data)
-
-    if not isinstance(data, pd.DataFrame):
-        raise TypeError("data must be a pandas DataFrame")
 
     nodes = [str(c) for c in data.columns]
     test = _check_test(test, data)
 
-    if not 0 < alpha < 1:
-        raise ValueError("alpha must be between 0 and 1")
-
-    max_sx = len(nodes) if max_sx is None else int(max_sx)
+    alpha = _check_alpha(alpha)
+    max_sx = _check_max_sx(max_sx, len(nodes))
 
     whitelist = [(str(a), str(b)) for a, b in (whitelist or ())]
     blacklist = [(str(a), str(b)) for a, b in (blacklist or ())]
@@ -1034,9 +1064,7 @@ def learn_nbr(data, node, method="mmpc", whitelist=None, blacklist=None,
 
 def _learn_local(data, node, blanket_fn, whitelist, blacklist, test, alpha,
                  max_sx):
-    if not isinstance(data, pd.DataFrame):
-        raise TypeError("data must be a pandas DataFrame")
-
+    _check_frame(data)
     _check_complete(data)
 
     nodes = [str(c) for c in data.columns]
@@ -1045,7 +1073,8 @@ def _learn_local(data, node, blanket_fn, whitelist, blacklist, test, alpha,
         raise ValueError(f"unknown node {node!r}")
 
     test = _check_test(test, data)
-    max_sx = len(nodes) if max_sx is None else int(max_sx)
+    alpha = _check_alpha(alpha)
+    max_sx = _check_max_sx(max_sx, len(nodes))
 
     whitelist = [(str(a), str(b)) for a, b in (whitelist or ())]
     blacklist = build_blacklist(

@@ -17,6 +17,7 @@ from ._core import (conditional_gaussian_parameters,
                     discrete_parameters, gaussian_parameters,
                     parent_configurations, predict_bayes_lw,
                     predict_parents)
+from ._validate import check_positive, check_positive_integer
 from .structure import _data_type, is_discrete_column
 
 __all__ = ["ConditionalGaussianNode", "DiscreteNode", "FittedNetwork",
@@ -185,10 +186,35 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
     """
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data must be a pandas DataFrame")
+    if not len(data):
+        raise ValueError("the data contain no observations")
+
+    # An infinity is not a missing value, so the per-node completeness rule
+    # below waves it through, and it reaches the Gaussian estimator as a
+    # number: the mean and the variance both come out non-finite and the
+    # fitted node reports a distribution rather than a failure.  The test is
+    # isinf() and not isfinite(), because a NaN *is* a missing value here --
+    # unlike the searches, parameter learning is expected to cope with gaps.
+    unbounded = [str(c) for c in data.columns
+                 if pd.api.types.is_numeric_dtype(data[c])
+                 and bool(np.isinf(data[c].to_numpy()).any())]
+    if unbounded:
+        raise ValueError("the data contain non-finite values in "
+                         + ", ".join(unbounded[:5])
+                         + (", ..." if len(unbounded) > 5 else ""))
 
     nodes = [str(c) for c in data.columns]
     if set(nodes) != set(network.nodes):
+        if len(network.nodes) != len(nodes):
+            raise ValueError(
+                "the network and the data have different numbers of "
+                f"variables: {len(network.nodes)} and {len(nodes)}")
         raise ValueError("the network and the data have different variables")
+
+    # check.iss(): the weight of the Dirichlet prior.  Zero or less makes the
+    # prior counts non-positive, which the estimator turns into a probability
+    # table that still sums to one and is still returned.
+    iss = check_positive(iss, "the imaginary sample size", default=1.0)
 
     # Unlike the searches, parameter learning copes with gaps: the C code
     # counts complete cases instead, but only when it is told to, so it has
@@ -367,7 +393,10 @@ def predict(fitted, node, data, method="parents", predictors=None, n=500,
                     f"{node!r} is both a predictor and the node being "
                     "predicted")
         values, probabilities = predict_bayes_lw(
-            fitted, node, data, predictors, n=int(n), prob=prob)
+            fitted, node, data, predictors,
+            n=check_positive_integer(
+                n, "the number of observations to be sampled"),
+            prob=prob)
 
     if not prob:
         return values

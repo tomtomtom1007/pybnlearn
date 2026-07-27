@@ -24,7 +24,8 @@ py.extension_module(
 )
 
 py.install_sources(
-  ['__init__.py', 'bootstrap.py', 'causal.py', 'classifiers.py',
+  ['__init__.py', '_validate.py', 'bootstrap.py', 'causal.py',
+   'classifiers.py',
    'constraint.py', 'divergence.py', 'exact.py', 'fit.py', 'foreign.py',
    'graph.py', 'hybrid.py', 'inference.py', 'lingam.py', 'missing.py',
    'mvnorm.py',

@@ -20,6 +20,7 @@ import pandas as pd
 
 from ._core import (configuration_factor, dedup_columns,
                     discretize_joint, discretize_marginal)
+from ._validate import is_number, is_probability
 
 __all__ = ["configs", "dedup", "discretize"]
 
@@ -58,7 +59,10 @@ def discretize(data, method="quantile", breaks=3, ordered=False, idisc=None,
 
     columns = [str(c) for c in data.columns]
 
-    if isinstance(breaks, int):
+    # A single count applies to every variable.  R truncates a fractional
+    # one on its way into C rather than refusing it, so 2.5 intervals means
+    # 2; matching that is what keeps this from raising where R returns.
+    if is_number(breaks):
         breaks = [breaks] * len(columns)
     breaks = [int(b) for b in breaks]
     if len(breaks) != len(columns):
@@ -121,8 +125,23 @@ def dedup(data, threshold=0.90):
     """
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data must be a pandas DataFrame")
-    if not 0 <= threshold <= 1:
+    if not is_probability(threshold):
         raise ValueError("the correlation threshold must be in [0, 1]")
+
+    # The correlation this is built on is only defined for numbers, and the C
+    # backend does not check: handed a factor it reads the level codes as
+    # doubles off a buffer that is not there and takes the interpreter down
+    # with it.  R has the same hole -- dedup() with no method= segfaults just
+    # as readily -- but it does at least refuse the call when the label is
+    # given explicitly, which is the check being reproduced here.
+    categorical = [str(c) for c in data.columns
+                   if not pd.api.types.is_numeric_dtype(data[c])]
+    if categorical:
+        raise ValueError(
+            "method 'cor' may only be used with continuous data; "
+            + ", ".join(categorical[:5])
+            + (", ..." if len(categorical) > 5 else "")
+            + (" is" if len(categorical) == 1 else " are") + " not numeric")
 
     kept = dedup_columns(data, float(threshold))
     return pd.DataFrame(kept, columns=list(kept), index=data.index)

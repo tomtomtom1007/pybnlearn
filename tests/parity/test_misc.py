@@ -142,7 +142,7 @@ def test_restarts_do_not_make_the_network_worse(datasets):
 
 
 def test_perturb_must_be_positive_when_restarting(datasets):
-    with pytest.raises(ValueError, match="perturb"):
+    with pytest.raises(ValueError, match="changes at each random restart"):
         pybnlearn.hc(datasets["learning.test"], restart=2, perturb=0)
 
 
