@@ -15,8 +15,8 @@ requires = [
 ]
 
 [project]
-name = "pybnlearn"
-version = "0.1.0.dev0"
+name = "bnlearn-port"
+version = "0.1.0a1"
 description = "A Python port of the R package bnlearn: Bayesian network structure learning, parameter learning and inference"
 readme = "README.md"
 license = "GPL-3.0-or-later"

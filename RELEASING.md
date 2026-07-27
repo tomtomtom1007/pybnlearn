@@ -12,7 +12,7 @@
 
    | field | value |
    |---|---|
-   | PyPI project name | `pybnlearn` |
+   | PyPI project name | `bnlearn-port` |
    | Owner | your GitHub account or org |
    | Repository name | `pybnlearn` |
    | Workflow name | `wheels.yml` |
@@ -21,12 +21,17 @@
    Create the matching `pypi` environment under the repository's
    Settings → Environments. Restrict it to tags if you want a second gate.
 
-3. **Decide the version.** `pyproject.toml` currently says `0.1.0.dev0`.
-   `0.1.0a1` is still the more honest first release: not because much is
-   missing -- 139 of bnlearn's 160 exports are ported and checked -- but
-   because nobody outside this repository has run it yet, and PyPI treats an
-   alpha as a pre-release, so `pip install pybnlearn` will not pick it up
-   unless somebody asks for it.
+3. ~~Decide the version.~~ Done: `0.1.0a1`, in `pyproject.toml` and
+   `src/pybnlearn/__init__.py`.  An alpha not because much is missing -- 139
+   of bnlearn's 160 exports are ported and checked -- but because nobody
+   outside this repository has run it, and PyPI treats a pre-release as
+   opt-in, so `pip install bnlearn-port` will not pick it up unless somebody
+   asks for it.
+
+   **The distribution is `bnlearn-port`; the import is still `pybnlearn`.**
+   PyPI refuses names too close to an existing project and there is already a
+   `bnlearn` there.  Only `[project] name` changed; `meson.build`, the source
+   tree and every example are untouched.
 
 ## Cutting a release
 
@@ -64,7 +69,7 @@ then install from there in a clean environment:
 
 ```bash
 pip install --index-url https://test.pypi.org/simple/ \
-            --extra-index-url https://pypi.org/simple/ pybnlearn
+            --extra-index-url https://pypi.org/simple/ bnlearn-port
 ```
 
 The extra index is needed because NumPy and pandas are not on TestPyPI.

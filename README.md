@@ -50,14 +50,24 @@ generated to. Where it cannot be that good, and why, is set out under
 Because bnlearn is GPL-2 | GPL-3, pybnlearn is distributed under the GPL v3 or
 later. See `NOTICE` for attribution.
 
-This project is unrelated to the PyPI package called `bnlearn`, which is a
-separate MIT-licensed project built on pgmpy.
-
 ## Install
 
 ```bash
-pip install pybnlearn
+pip install bnlearn-port
 ```
+
+```python
+import pybnlearn        # the install name and the import name differ
+```
+
+**Installed as `bnlearn-port`, imported as `pybnlearn`.** PyPI declines names
+too close to an existing project, and there is already a package called
+`bnlearn` there — a separate, MIT-licensed one built on pgmpy, unrelated to
+this and to Scutari's R package. The rule is doing its job: two
+Bayesian-network packages a prefix apart would be genuinely confusing. So the
+distribution took a name that says what it is, and the import name stayed put
+rather than churn every example. Python does this often enough to be
+unremarkable — `scikit-learn` imports as `sklearn`, `Pillow` as `PIL`.
 
 ## Use
 
