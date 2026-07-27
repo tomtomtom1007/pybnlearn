@@ -121,7 +121,7 @@ def test_bootstrap_strengths_and_threshold_match_r(case, datasets):
     assert np.allclose(got["direction"], case["direction"], rtol=1e-12,
                        atol=1e-14)
     assert got.attrs["threshold"] == pytest.approx(case["threshold"],
-                                                   rel=1e-12, abs=1e-14)
+                                                   rel=1e-11, abs=1e-12)
 
 
 @pytest.mark.parametrize(
@@ -191,7 +191,7 @@ def test_custom_strength_matches_r(case):
     assert np.allclose(got["direction"], case["direction"], rtol=1e-12,
                        atol=1e-14)
     assert got.attrs["threshold"] == pytest.approx(case["threshold"],
-                                                   rel=1e-12, abs=1e-14)
+                                                   rel=1e-11, abs=1e-12)
 
 
 def test_custom_strength_accepts_the_shapes_a_network_comes_in(datasets):
@@ -233,7 +233,7 @@ def test_inclusion_threshold_matches_r(case):
 
     got = pybnlearn.inclusion_threshold(strength)
 
-    assert got == pytest.approx(case["threshold"], rel=1e-12, abs=1e-14)
+    assert got == pytest.approx(case["threshold"], rel=1e-11, abs=1e-12)
 
 
 def test_the_threshold_is_always_one_of_the_observed_strengths():

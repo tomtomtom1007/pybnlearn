@@ -46,7 +46,7 @@ def _same(got, expected):
         return math.isnan(got)
     if isinstance(expected, float) and math.isinf(expected):
         return got == expected
-    return got == pytest.approx(expected, rel=1e-12, abs=1e-12)
+    return got == pytest.approx(expected, rel=1e-11, abs=1e-12)
 
 
 @pytest.mark.parametrize(

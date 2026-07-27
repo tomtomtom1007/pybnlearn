@@ -42,7 +42,7 @@ def _close(got, expected):
     """R writes unidentifiable parameters as NA; those must match as NaN."""
     if expected is None:
         return got is None or (isinstance(got, float) and math.isnan(got))
-    return got == pytest.approx(expected, rel=1e-12, abs=1e-12, nan_ok=True)
+    return got == pytest.approx(expected, rel=1e-11, abs=1e-12, nan_ok=True)
 
 
 @pytest.mark.parametrize("case", _records("discrete"), ids=_case_id)

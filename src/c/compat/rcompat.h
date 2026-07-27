@@ -348,9 +348,11 @@ void revsort(double *a, int *ib, int n);
 /* LAPACK/BLAS.  bnlearn only reaches for dgesdd, dgesvd, dgetrf and dgemm;
  * they are resolved against the BLAS/LAPACK that SciPy already ships, so
  * pybnlearn needs no BLAS of its own.  Declared with the usual F77 mangling. */
-#define F77_CALL(x) x ## _
-#define F77_NAME(x) x ## _
-#define F77_SUB(x)  x ## _
+#include "blas_names.h"
+
+#define F77_CALL(x) PYBN_BLAS(x)
+#define F77_NAME(x) PYBN_BLAS(x)
+#define F77_SUB(x)  PYBN_BLAS(x)
 
 /* Fortran hidden character-length arguments.  bnlearn's rcore.h defines
  * USE_FC_LEN_T before including <R_ext/Lapack.h>, so FCONE has to expand to a

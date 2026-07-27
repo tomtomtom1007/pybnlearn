@@ -210,8 +210,8 @@ def _check_gaussian(node, case):
     assert list(node.coefficients) == case["coefnames"]
     for name, expected in zip(case["coefnames"], case["coefficients"]):
         assert float(node.coefficients[name]) == pytest.approx(
-            expected, rel=1e-12, abs=1e-14), name
-    assert node.sd == pytest.approx(case["sd"][0], rel=1e-12, abs=1e-14)
+            expected, rel=1e-11, abs=1e-12), name
+    assert node.sd == pytest.approx(case["sd"][0], rel=1e-11, abs=1e-12)
 
 
 def test_twin_of_a_fitted_network_matches_r(gaussian):

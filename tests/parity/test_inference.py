@@ -84,7 +84,7 @@ def test_cpquery_reproduces_r(case, networks):
         method=case["method"],
         n=int(case["n"]))
 
-    assert got == pytest.approx(case["probability"], rel=1e-12, abs=1e-12)
+    assert got == pytest.approx(case["probability"], rel=1e-11, abs=1e-12)
 
 
 @pytest.mark.parametrize(

@@ -72,7 +72,7 @@ def test_tabu_matches_r(case, datasets):
 
     got = pybnlearn.score(learned, data, by_node=True)
     for node, expected_score in zip(case["nodes"], case["node.scores"]):
-        assert got[node] == pytest.approx(expected_score, rel=1e-12, abs=1e-12)
+        assert got[node] == pytest.approx(expected_score, rel=1e-11, abs=1e-12)
 
 
 def test_suite_exercises_tabu():

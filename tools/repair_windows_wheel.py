@@ -28,9 +28,9 @@ def main(argv):
 
     dest_dir, wheel = argv
 
-    import scipy_openblas64
+    import scipy_openblas32
 
-    library_dir = scipy_openblas64.get_lib_dir()
+    library_dir = scipy_openblas32.get_lib_dir()
 
     command = [
         sys.executable, "-m", "delvewheel", "repair",

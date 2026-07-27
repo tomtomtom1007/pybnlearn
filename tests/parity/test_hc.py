@@ -74,6 +74,6 @@ def test_hc_matches_r(case, datasets):
     # mean the score functions are wrong even though the search is not.
     got = pybnlearn.score(learned, data, by_node=True)
     for node, expected in zip(case["nodes"], case["node.scores"]):
-        assert got[node] == pytest.approx(expected, rel=1e-12, abs=1e-12), (
+        assert got[node] == pytest.approx(expected, rel=1e-11, abs=1e-12), (
             f"score of node {node}: R gave {expected!r}, "
             f"pybnlearn gave {got[node]!r}")

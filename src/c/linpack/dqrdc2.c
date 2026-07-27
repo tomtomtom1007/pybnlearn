@@ -22,15 +22,16 @@
 
 #include <math.h>
 #include <stddef.h>
+#include "../compat/blas_names.h"
 
 #define X(i, j)     x[((j) - 1) * (*ldx) + ((i) - 1)]
 #define WORK(j, k)  work[((k) - 1) * (*p) + ((j) - 1)]
 
-extern double dnrm2_(const int *n, const double *x, const int *incx);
-extern double ddot_(const int *n, const double *x, const int *incx,
+extern double PYBN_BLAS(dnrm2)(const int *n, const double *x, const int *incx);
+extern double PYBN_BLAS(ddot)(const int *n, const double *x, const int *incx,
     const double *y, const int *incy);
-extern void dscal_(const int *n, const double *a, double *x, const int *incx);
-extern void daxpy_(const int *n, const double *a, const double *x,
+extern void PYBN_BLAS(dscal)(const int *n, const double *a, double *x, const int *incx);
+extern void PYBN_BLAS(daxpy)(const int *n, const double *a, const double *x,
     const int *incx, double *y, const int *incy);
 
 /* Fortran's SIGN(a, b): |a| carrying b's sign, with zero counting as
@@ -41,7 +42,7 @@ static double fsign(double a, double b) {
 
 }/*FSIGN*/
 
-void dqrdc2_(double *x, const int *ldx, const int *n, const int *p,
+void PYBN_BLAS(dqrdc2)(double *x, const int *ldx, const int *n, const int *p,
     const double *tol, int *k, double *qraux, int *jpvt, double *work) {
 
 int i = 0, j = 0, l = 0, lup = 0;
@@ -53,7 +54,7 @@ double tt = 0, ttt = 0, nrmxl = 0, t = 0;
 
     for (j = 1; j <= *p; j++) {
 
-      qraux[j - 1] = dnrm2_(n, &X(1, j), &one);
+      qraux[j - 1] = PYBN_BLAS(dnrm2)(n, &X(1, j), &one);
       WORK(j, 1) = qraux[j - 1];
       WORK(j, 2) = qraux[j - 1];
       if (WORK(j, 2) == 0.0)
@@ -110,7 +111,7 @@ double tt = 0, ttt = 0, nrmxl = 0, t = 0;
 
       /* compute the householder transformation for column l. */
       len = *n - l + 1;
-      nrmxl = dnrm2_(&len, &X(l, l), &one);
+      nrmxl = PYBN_BLAS(dnrm2)(&len, &X(l, l), &one);
 
       if (nrmxl != 0.0) {
 
@@ -118,7 +119,7 @@ double tt = 0, ttt = 0, nrmxl = 0, t = 0;
           nrmxl = fsign(nrmxl, X(l, l));
 
         t = 1.0 / nrmxl;
-        dscal_(&len, &t, &X(l, l), &one);
+        PYBN_BLAS(dscal)(&len, &t, &X(l, l), &one);
         X(l, l) = 1.0 + X(l, l);
 
         /* apply the transformation to the remaining columns, updating the
@@ -127,8 +128,8 @@ double tt = 0, ttt = 0, nrmxl = 0, t = 0;
 
           for (j = l + 1; j <= *p; j++) {
 
-            t = -ddot_(&len, &X(l, l), &one, &X(l, j), &one) / X(l, l);
-            daxpy_(&len, &t, &X(l, l), &one, &X(l, j), &one);
+            t = -PYBN_BLAS(ddot)(&len, &X(l, l), &one, &X(l, j), &one) / X(l, l);
+            PYBN_BLAS(daxpy)(&len, &t, &X(l, l), &one, &X(l, j), &one);
 
             if (qraux[j - 1] != 0.0) {
 
@@ -148,7 +149,7 @@ double tt = 0, ttt = 0, nrmxl = 0, t = 0;
               else {
 
                 len = *n - l;
-                qraux[j - 1] = dnrm2_(&len, &X(l + 1, j), &one);
+                qraux[j - 1] = PYBN_BLAS(dnrm2)(&len, &X(l + 1, j), &one);
                 WORK(j, 1) = qraux[j - 1];
                 len = *n - l + 1;
 

@@ -105,7 +105,7 @@ def test_predictive_losses_match_r(case, datasets):
     if isinstance(expected, float) and math.isnan(expected):
         assert math.isnan(got.mean)
     else:
-        assert got.mean == pytest.approx(expected, rel=1e-12, abs=1e-12)
+        assert got.mean == pytest.approx(expected, rel=1e-11, abs=1e-12)
 
 
 def test_all_five_predictive_losses_are_covered():

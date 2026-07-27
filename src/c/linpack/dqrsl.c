@@ -21,17 +21,18 @@
 
 #include <math.h>
 #include <stddef.h>
+#include "../compat/blas_names.h"
 
 #define X(i, j)  x[((j) - 1) * (*ldx) + ((i) - 1)]
 
-extern double ddot_(const int *n, const double *x, const int *incx,
+extern double PYBN_BLAS(ddot)(const int *n, const double *x, const int *incx,
     const double *y, const int *incy);
-extern void daxpy_(const int *n, const double *a, const double *x,
+extern void PYBN_BLAS(daxpy)(const int *n, const double *a, const double *x,
     const int *incx, double *y, const int *incy);
-extern void dcopy_(const int *n, const double *x, const int *incx, double *y,
+extern void PYBN_BLAS(dcopy)(const int *n, const double *x, const int *incx, double *y,
     const int *incy);
 
-void dqrsl_(double *x, const int *ldx, const int *n, const int *k,
+void PYBN_BLAS(dqrsl)(double *x, const int *ldx, const int *n, const int *k,
     double *qraux, double *y, double *qy, double *qty, double *b, double *rsd,
     double *xb, const int *job, int *info) {
 
@@ -78,9 +79,9 @@ double t = 0, temp = 0;
 
   /* set up to compute qy or qty. */
   if (cqy)
-    dcopy_(n, y, &one, qy, &one);
+    PYBN_BLAS(dcopy)(n, y, &one, qy, &one);
   if (cqty)
-    dcopy_(n, y, &one, qty, &one);
+    PYBN_BLAS(dcopy)(n, y, &one, qty, &one);
 
   /* compute qy. */
   if (cqy) {
@@ -94,8 +95,8 @@ double t = 0, temp = 0;
         temp = X(j, j);
         X(j, j) = qraux[j - 1];
         len = *n - j + 1;
-        t = -ddot_(&len, &X(j, j), &one, &qy[j - 1], &one) / X(j, j);
-        daxpy_(&len, &t, &X(j, j), &one, &qy[j - 1], &one);
+        t = -PYBN_BLAS(ddot)(&len, &X(j, j), &one, &qy[j - 1], &one) / X(j, j);
+        PYBN_BLAS(daxpy)(&len, &t, &X(j, j), &one, &qy[j - 1], &one);
         X(j, j) = temp;
 
       }/*THEN*/
@@ -114,8 +115,8 @@ double t = 0, temp = 0;
         temp = X(j, j);
         X(j, j) = qraux[j - 1];
         len = *n - j + 1;
-        t = -ddot_(&len, &X(j, j), &one, &qty[j - 1], &one) / X(j, j);
-        daxpy_(&len, &t, &X(j, j), &one, &qty[j - 1], &one);
+        t = -PYBN_BLAS(ddot)(&len, &X(j, j), &one, &qty[j - 1], &one) / X(j, j);
+        PYBN_BLAS(daxpy)(&len, &t, &X(j, j), &one, &qty[j - 1], &one);
         X(j, j) = temp;
 
       }/*THEN*/
@@ -126,17 +127,17 @@ double t = 0, temp = 0;
 
   /* set up to compute b, rsd or xb. */
   if (cb)
-    dcopy_(k, qty, &one, b, &one);
+    PYBN_BLAS(dcopy)(k, qty, &one, b, &one);
 
   kp1 = *k + 1;
 
   if (cxb)
-    dcopy_(k, qty, &one, xb, &one);
+    PYBN_BLAS(dcopy)(k, qty, &one, xb, &one);
 
   if (cr && *k < *n) {
 
     len = *n - *k;
-    dcopy_(&len, &qty[kp1 - 1], &one, &rsd[kp1 - 1], &one);
+    PYBN_BLAS(dcopy)(&len, &qty[kp1 - 1], &one, &rsd[kp1 - 1], &one);
 
   }/*THEN*/
 
@@ -174,7 +175,7 @@ double t = 0, temp = 0;
 
         t = -b[j - 1];
         len = j - 1;
-        daxpy_(&len, &t, &X(1, j), &one, b, &one);
+        PYBN_BLAS(daxpy)(&len, &t, &X(1, j), &one, b, &one);
 
       }/*THEN*/
 
@@ -197,15 +198,15 @@ double t = 0, temp = 0;
 
         if (cr) {
 
-          t = -ddot_(&len, &X(j, j), &one, &rsd[j - 1], &one) / X(j, j);
-          daxpy_(&len, &t, &X(j, j), &one, &rsd[j - 1], &one);
+          t = -PYBN_BLAS(ddot)(&len, &X(j, j), &one, &rsd[j - 1], &one) / X(j, j);
+          PYBN_BLAS(daxpy)(&len, &t, &X(j, j), &one, &rsd[j - 1], &one);
 
         }/*THEN*/
 
         if (cxb) {
 
-          t = -ddot_(&len, &X(j, j), &one, &xb[j - 1], &one) / X(j, j);
-          daxpy_(&len, &t, &X(j, j), &one, &xb[j - 1], &one);
+          t = -PYBN_BLAS(ddot)(&len, &X(j, j), &one, &xb[j - 1], &one) / X(j, j);
+          PYBN_BLAS(daxpy)(&len, &t, &X(j, j), &one, &xb[j - 1], &one);
 
         }/*THEN*/
 

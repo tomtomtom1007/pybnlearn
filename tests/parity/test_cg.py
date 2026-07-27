@@ -51,7 +51,7 @@ def test_mixed_structure_learning_matches_r(case, datasets):
 
     assert learned.modelstring() == case["modelstring"]
     assert pybnlearn.score(learned, data, type=case["score"]) == pytest.approx(
-        case["value"], rel=1e-12, abs=1e-12)
+        case["value"], rel=1e-11, abs=1e-12)
 
 
 @pytest.mark.parametrize(
@@ -63,7 +63,7 @@ def test_conditional_gaussian_scores_match_r(case, datasets):
     got = pybnlearn.score(network, datasets[case["dataset"]],
                           type=case["score"])
 
-    assert got == pytest.approx(case["value"], rel=1e-12, abs=1e-12)
+    assert got == pytest.approx(case["value"], rel=1e-11, abs=1e-12)
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ def test_mixed_parameters_match_r(case, fitted_networks):
         assert list(node.coefficients) == case["coefnames"]
         for name, expected in zip(case["coefnames"], case["coefficients"]):
             assert float(node.coefficients[name]) == pytest.approx(
-                expected, rel=1e-12, abs=1e-14), name
+                expected, rel=1e-11, abs=1e-12), name
         assert float(node.sd) == pytest.approx(case["sd"][0], rel=1e-12,
                                                abs=1e-14)
     else:

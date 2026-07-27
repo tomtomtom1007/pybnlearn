@@ -70,27 +70,39 @@ endif
 # falls through to a CMake probe that reports an unrelated failure about
 # Visual Studio generators.
 if not lapack.found()
+  # scipy-openblas32, not -64: the 64 build is ILP64, so its integer arguments
+  # are eight bytes wide while every declaration here passes `const int *`.
+  # It would link once the names matched and then read garbage lengths.
+  #
+  # Both builds also carry a symbol prefix so they can coexist with another
+  # BLAS in the same process -- scipy_dgemm_ rather than dgemm_ -- and this
+  # project declares those routines itself instead of including OpenBLAS's
+  # headers, so the prefix has to be handed to compat/blas_names.h.  Without
+  # it the link fails on dcopy_, ddot_ and daxpy_.
   probe = run_command(py, '-c',
-    'import scipy_openblas64 as ob;' +
-    'print(ob.get_include_dir());' +
+    'import scipy_openblas32 as ob;' +
     'print(ob.get_lib_dir());' +
     'print(ob.get_library())',
     check: false)
 
   if probe.returncode() == 0
     parts = probe.stdout().strip().split('\n')
-    ob_include = parts[0].strip()
-    ob_libdir = parts[1].strip()
-    ob_library = parts[2].strip()
+    ob_libdir = parts[0].strip()
+    ob_library = parts[1].strip()
 
-    ob_lib = meson.get_compiler('c').find_library(
-      ob_library, dirs: [ob_libdir], required: false)
+    ob_lib = cc.find_library(ob_library, dirs: [ob_libdir], required: false)
 
     if ob_lib.found()
-      lapack = declare_dependency(
-        include_directories: include_directories(ob_include),
-        dependencies: [ob_lib])
+      # No include directory: this project declares the routines it calls
+      # itself rather than including OpenBLAS's headers, so all it needs from
+      # the package is the library and the prefix its symbols carry.  Asking
+      # for the include directory would also fail whenever the interpreter
+      # lives inside the source tree, which meson refuses to form absolute
+      # paths into.
+      add_project_arguments('-DBLAS_SYMBOL_PREFIX=scipy_', language: 'c')
+      lapack = declare_dependency(dependencies: [ob_lib])
       blas = declare_dependency()
+      message('using scipy-openblas32 from ' + ob_libdir)
     endif
   endif
 endif

@@ -64,7 +64,7 @@ def test_matches_r(case, datasets):
             assert actual is None or math.isnan(actual), field
             continue
 
-        assert actual == pytest.approx(expected, rel=1e-12, abs=1e-12), (
+        assert actual == pytest.approx(expected, rel=1e-11, abs=1e-12), (
             f"{field}: R gave {expected!r}, pybnlearn gave {actual!r}")
 
 

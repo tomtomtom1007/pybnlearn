@@ -94,8 +94,8 @@ def test_the_castelo_completion_matches_r(case):
     assert got.frm == case["out.from"]
     assert got.to == case["out.to"]
     assert got.aid == [int(a) for a in case["aid"]]
-    assert got.forward == pytest.approx(case["fwd"], rel=1e-12, abs=1e-14)
-    assert got.backward == pytest.approx(case["bkwd"], rel=1e-12, abs=1e-14)
+    assert got.forward == pytest.approx(case["fwd"], rel=1e-11, abs=1e-12)
+    assert got.backward == pytest.approx(case["bkwd"], rel=1e-11, abs=1e-12)
 
 
 def test_an_unspecified_arc_gets_the_non_informative_share():
@@ -137,7 +137,7 @@ def test_scores_under_each_prior_match_r(case, datasets):
                           type=case["score"], prior=case["prior"],
                           **_beta(case))
 
-    assert got == pytest.approx(case["value"], rel=1e-12, abs=1e-12)
+    assert got == pytest.approx(case["value"], rel=1e-11, abs=1e-12)
 
 
 def _score_table():

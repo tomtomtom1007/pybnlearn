@@ -21,6 +21,7 @@ import json
 import pathlib
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import pybnlearn
@@ -270,7 +271,74 @@ def test_discretize_matches_r(case, datasets):
 
     for name, levels in case["levels"].items():
         assert list(got[name].cat.categories) == levels, name
+
+    if _tie_sensitive(data, case, extra):
+        # The boundaries are decided by ties finer than two implementations
+        # can agree on -- see the test below, which measures it.  The level
+        # names and their number still have to match, and do, but which side
+        # of a boundary a given observation falls on is not reproducible
+        # across platforms and must not be asserted.
+        return
+
+    for name in case["levels"]:
         assert list(got[name].astype(str)[:30]) == case["head"][name], name
+
+
+def _tie_sensitive(data, case, extra):
+    """Whether a one-ulp change anywhere in the data moves this
+    discretization.  Measured rather than assumed, because the answer
+    depends on the data and the number of initial bins, not on the method
+    alone."""
+    if case["method"] != "hartemink":
+        return False
+
+    reference = _discretized(data, case, extra)
+
+    for i, column in enumerate(data.columns):
+        nudged = data.copy()
+        nudged.loc[i, column] = np.nextafter(nudged.loc[i, column], np.inf)
+        if _discretized(nudged, case, extra) != reference:
+            return True
+
+    return False
+
+
+def _discretized(frame, case, extra):
+    out = pybnlearn.discretize(frame, method=case["method"],
+                               breaks=int(case["breaks"]), **extra)
+    return {c: list(out[c].astype(str)) for c in out.columns}
+
+
+def test_hartemink_on_marks_really_is_decided_by_ties():
+    """Justification for the skip above, kept as its own test so that the
+    skip cannot quietly start covering a real disagreement.
+
+    Hartemink's method merges initial bins to minimise the mutual
+    information lost.  With 30 initial bins over 88 observations most of
+    them hold two or three points, so the differences it is choosing between
+    are tiny -- and a change in the last bit of one observation, which is
+    the same data by any reasonable reading, moves the answer.  glibc and
+    Apple's libm differ by that much in log(), so the two platforms cannot
+    agree here and neither is wrong.
+    """
+    data = pd.read_csv(FIXTURES / "marks.csv", dtype="float64")
+    case = {"method": "hartemink", "breaks": 3}
+    extra = {"idisc": "quantile", "ibreaks": 30}
+
+    reference = _discretized(data, case, extra)
+    moved = 0
+
+    for i in range(12):
+        nudged = data.copy()
+        column = data.columns[i % data.shape[1]]
+        nudged.loc[i, column] = np.nextafter(nudged.loc[i, column], np.inf)
+        if _discretized(nudged, case, extra) != reference:
+            moved += 1
+
+    assert moved > 0, (
+        "a one-ulp change no longer moves this discretization; if that is "
+        "real, the exact comparison in test_discretize_matches_r can be "
+        "restored for it")
 
 
 def test_both_kinds_of_discretization_are_covered():
