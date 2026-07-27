@@ -95,22 +95,34 @@ def test_maxp_limits_the_number_of_parents(discrete):
         assert len(learned.parents(node)) <= 1
 
 
+def _rss_mb():
+    """Resident set size in megabytes, or a skip where it cannot be had.
+
+    `resource` is Unix-only and the standard library offers no Windows
+    equivalent, so these two tests do not run there.  That is a smaller gap
+    than it looks: the arena they are watching is plain C with no
+    platform-specific paths, so a leak would show on any of the three.
+    Reaching for psutil to close it would add a dependency to the test suite
+    for one assertion.
+    """
+    resource = pytest.importorskip(
+        "resource", reason="no RSS measurement in the stdlib on Windows")
+
+    # ru_maxrss is bytes on macOS and kibibytes on Linux
+    raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return raw / 1e6 if raw > 1e7 else raw / 1e3
+
+
 def test_repeated_runs_do_not_grow_memory(discrete):
     """The search allocates into an arena that is freed when it finishes; if
     that stopped happening, this is where it would show."""
-    import resource
-
-    def rss_mb():                      # ru_maxrss is bytes on macOS, KiB on Linux
-        raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return raw / 1e6 if raw > 1e7 else raw / 1e3
-
     for _ in range(20):
         pybnlearn.hc(discrete)
-    baseline = rss_mb()
+    baseline = _rss_mb()
     for _ in range(200):
         pybnlearn.hc(discrete)
 
-    assert rss_mb() - baseline < 50, "memory grew across repeated searches"
+    assert _rss_mb() - baseline < 50, "memory grew across repeated searches"
 
 
 def test_modelstring_round_trips_through_arcs(discrete):
@@ -132,19 +144,14 @@ def test_tabu_returns_the_best_network_not_the_last(discrete):
 def test_tabu_memory_is_flat_across_runs(discrete):
     """The tabu list holds hashes for the whole search rather than per call,
     which is exactly the kind of thing that leaks if it is built wrong."""
-    import resource
-
-    def rss_mb():
-        raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return raw / 1e6 if raw > 1e7 else raw / 1e3
 
     for _ in range(20):
         pybnlearn.tabu(discrete, tabu=10)
-    baseline = rss_mb()
+    baseline = _rss_mb()
     for _ in range(200):
         pybnlearn.tabu(discrete, tabu=10)
 
-    assert rss_mb() - baseline < 50, "memory grew across repeated searches"
+    assert _rss_mb() - baseline < 50, "memory grew across repeated searches"
 
 
 def _is_undirected(net):
