@@ -257,10 +257,14 @@ def _check_score_args(score, data, extra_args):
 
     if "prior" in accepted:
         out["prior"] = extra_args.get("prior", "uniform")
-        if out["prior"] not in ("uniform",):
-            raise NotImplementedError(
-                f"the {out['prior']!r} graph prior is not wired up yet; only "
-                "'uniform' is available")
+        if out["prior"] not in _GRAPH_PRIORS:
+            raise ValueError(
+                f"the {out['prior']!r} graph prior is not one of "
+                + ", ".join(sorted(_GRAPH_PRIORS)))
+
+        beta = _check_graph_prior(out["prior"], extra_args.get("beta"), data)
+        if beta is not None:
+            out["beta"] = beta
 
     if "iss" in accepted:
         # check.iss(): the de facto standard imaginary sample size is 1.
@@ -285,18 +289,104 @@ def _check_score_args(score, data, extra_args):
     return out
 
 
+_GRAPH_PRIORS = ("uniform", "vsp", "cs", "marginal")
+
+# the priors that make a Bayesian score depend on more than one node's
+# family at a time.
+_NON_DECOMPOSABLE_PRIORS = ("cs", "marginal")
+
+_BAYESIAN_SCORES = ("bde", "bds", "bdj", "bge")
+
+
+def _check_graph_prior(prior, beta, data):
+    """check.graph.hyperparameters(): the prior's own parameter.
+
+    A graph prior says how likely a *structure* is before the data are seen,
+    which is a different thing from the parameter priors the Bayesian scores
+    already have.  Three of the four need a hyperparameter, and each needs a
+    different shape of one.
+    """
+    from ._core import MarginalPrior, complete_castelo_prior
+
+    nodes = [str(c) for c in data.columns]
+
+    if prior == "uniform":
+        if beta is not None:
+            raise ValueError("the uniform graph prior takes no beta")
+        return None
+
+    if prior == "vsp":
+        # each arc is included independently with probability beta.
+        beta = 1 / (len(nodes) - 1) if beta is None else float(beta)
+        if not 0 <= beta < 1:
+            raise ValueError("beta must be a probability smaller than one")
+        return beta
+
+    if prior == "marginal":
+        beta = 0.5 if beta is None else float(beta)
+        if not 0 <= beta < 1:
+            raise ValueError("beta must be a probability smaller than one")
+        return MarginalPrior(beta, nodes)
+
+    # Castelo & Siebes: a probability for each arc you have an opinion
+    # about, completed to cover both directions of every pair.
+    if beta is None:
+        return complete_castelo_prior([], [], [], nodes)
+
+    if isinstance(beta, pd.DataFrame):
+        if list(beta.columns) != ["from", "to", "prob"]:
+            raise ValueError(
+                "beta must have the columns from, to and prob, in that order")
+        frm = [str(v) for v in beta["from"]]
+        to = [str(v) for v in beta["to"]]
+        probability = [float(v) for v in beta["prob"]]
+    else:
+        try:
+            frm = [str(a) for a, _, _ in beta]
+            to = [str(b) for _, b, _ in beta]
+            probability = [float(p) for _, _, p in beta]
+        except (TypeError, ValueError):
+            raise ValueError(
+                "beta must be a DataFrame with columns from, to and prob, or "
+                "a sequence of (from, to, probability) triples") from None
+
+    unknown = {n for n in frm + to} - set(nodes)
+    if unknown:
+        raise ValueError("unknown node(s): " + ", ".join(sorted(unknown)))
+    if any(not 0 <= p <= 1 for p in probability):
+        raise ValueError("the arc priors must be probabilities")
+
+    return complete_castelo_prior(frm, to, probability, nodes)
+
+
+# The graph priors that leave BDe and BGe score equivalent.  vsp and
+# marginal treat every arc alike, so reversing one does not change the
+# prior; the Castelo & Siebes prior has an opinion about direction, and so
+# breaks the equivalence.
+_EQUIVALENT_PRIORS = ("uniform", "marginal", "vsp")
+
+
 def _is_score_equivalent(score, extra_args):
     if score in _EQUIVALENT:
         return True
-    # BDe and BGe are score equivalent under the priors we support.
-    if score in ("bde", "bge") and extra_args.get("prior") == "uniform":
+    if (score in ("bde", "bge")
+            and extra_args.get("prior") in _EQUIVALENT_PRIORS):
         return True
     return False
 
 
 def _is_score_decomposable(score, extra_args):
-    # only the Castelo & Siebes priors break decomposability, and those are not
-    # supported yet, so everything reaching here is decomposable.
+    """is.score.decomposable(): whether a node's score depends only on its
+    own family.
+
+    The Castelo & Siebes and marginal priors put a probability on every
+    *pair* of nodes, adjacent or not, so changing one arc changes the prior
+    contribution of nodes the arc does not touch.  The search then has to
+    rescore everything rather than only what moved.
+    """
+    if (score in _BAYESIAN_SCORES
+            and extra_args.get("prior") in _NON_DECOMPOSABLE_PRIORS):
+        return False
     return True
 
 
@@ -550,7 +640,37 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
                 continue
 
             frm, to, op = best["from"], best["to"], best["op"]
+            cache = search.get_cache()
             arcs = _apply(arcs, op, frm, to)
+
+            # An informative graph prior contributes to every node's score,
+            # so a move changes the two endpoints' reference scores by more
+            # than the cached delta accounts for.  Recompute them.  R does
+            # this in hc() and not in tabu(), which is why the two land on
+            # different members of the same equivalence class.
+            if extra.get("prior") in _NON_DECOMPOSABLE_PRIORS:
+                reference = search.get_reference()
+                for name, value in zip((frm, to),
+                                       search.node_scores(arcs, [frm, to])):
+                    reference[index[name]] = value
+                search.set_reference(reference)
+
+            # A node whose reference score is -Inf has no baseline for the
+            # cached delta to be a difference from, so if the delta itself is
+            # finite the score has to be recomputed rather than added to.
+            reference = search.get_reference()
+            stale = [to] + ([frm] if op == "reverse" else [])
+            recompute = []
+            for name in stale:
+                other = frm if name == to else to
+                if (reference[index[name]] == -np.inf
+                        and np.isfinite(cache[index[other], index[name]])):
+                    recompute.append(name)
+            if recompute:
+                for name, value in zip(recompute,
+                                       search.node_scores(arcs, recompute)):
+                    reference[index[name]] = value
+                search.set_reference(reference)
 
             # the nodes whose cached deltas are now stale.
             updated = ([index[frm], index[to]] if op == "reverse"

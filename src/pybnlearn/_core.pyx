@@ -240,6 +240,10 @@ cdef SEXP _py_to_sexp(object obj):
         return Rf_ScalarInteger(<int>obj)
     if isinstance(obj, (float, np.floating)):
         return Rf_ScalarReal(<double>obj)
+    if type(obj).__name__ == "CastelloPrior":
+        return _castelo_sexp(obj)
+    if type(obj).__name__ == "MarginalPrior":
+        return _marginal_sexp(obj)
     if isinstance(obj, pd.Series):
         # A named numeric vector.  Some scores index their arguments by node
         # name rather than by position -- BGe's prior mean vector is looked up
@@ -2727,3 +2731,128 @@ def dedup_columns(data, double threshold):
         return _dataframe_to_py(_guarded(<void *>dedup, a, 4))
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# non-uniform graph priors
+# ---------------------------------------------------------------------------
+
+cdef extern SEXP castelo_completion(SEXP prior, SEXP nodes, SEXP learning)
+
+
+def _as_sequence(value):
+    """A one-element column comes back from R as a bare scalar; a prior over
+    a single pair of nodes is the ordinary case rather than a corner one, so
+    put the vector shape back."""
+    if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
+        return [value]
+    return list(value)
+
+
+class CastelloPrior:
+    """A completed Castelo & Siebes prior.
+
+    The user gives a probability for some arcs; the completion works out
+    what that implies for the two directions of every *pair* of nodes, and
+    numbers the pairs the way the C scoring code looks them up.  Carrying
+    the completed form around as an object means the completion happens once
+    rather than at every score evaluation.
+    """
+
+    def __init__(self, frm, to, aid, forward, backward, nodes):
+        self.frm = [str(v) for v in _as_sequence(frm)]
+        self.to = [str(v) for v in _as_sequence(to)]
+        self.aid = [int(a) for a in _as_sequence(aid)]
+        self.forward = [float(f) for f in _as_sequence(forward)]
+        self.backward = [float(b) for b in _as_sequence(backward)]
+        self.nodes = [str(n) for n in nodes]
+
+    def __len__(self):
+        return len(self.aid)
+
+    def __repr__(self):
+        return (f"CastelloPrior({len(self.aid)} arc pairs over "
+                f"{len(self.nodes)} nodes)")
+
+
+class MarginalPrior:
+    """The marginal uniform prior: one inclusion probability, plus the node
+    set the C code needs to count the pairs."""
+
+    def __init__(self, beta, nodes):
+        self.beta = float(beta)
+        self.nodes = [str(n) for n in nodes]
+
+    def __repr__(self):
+        return f"MarginalPrior(beta={self.beta}, {len(self.nodes)} nodes)"
+
+
+def complete_castelo_prior(frm, to, prob, node_names, bint learning=False):
+    """castelo_completion(): fill in what the user did not specify."""
+    cdef SEXP a[3]
+    cdef SEXP frame
+    cdef SEXP probs
+    cdef int i
+
+    frm = [str(v) for v in frm]
+    to = [str(v) for v in to]
+    prob = [float(v) for v in prob]
+    node_names = [str(v) for v in node_names]
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        frame = Rf_allocVector(VECSXP, 3)
+        Rf_SET_VECTOR_ELT(frame, 0, _str_vector(frm))
+        Rf_SET_VECTOR_ELT(frame, 1, _str_vector(to))
+        probs = Rf_allocVector(REALSXP, len(prob))
+        for i in range(len(prob)):
+            REAL(probs)[i] = prob[i]
+        Rf_SET_VECTOR_ELT(frame, 2, probs)
+        Rf_setAttrib(frame, R_NamesSymbol,
+                     _str_vector(["from", "to", "prob"]))
+
+        a[0] = frame
+        a[1] = _str_vector(node_names)
+        a[2] = Rf_ScalarLogical(1 if learning else 0)
+
+        completed = _sexp_to_py(_guarded(<void *>castelo_completion, a, 3))
+
+        return CastelloPrior(completed["from"], completed["to"],
+                             completed["aid"], completed["fwd"],
+                             completed["bkwd"], node_names)
+    finally:
+        pybn_arena_pop()
+
+
+cdef SEXP _castelo_sexp(object prior) except? NULL:
+    """The completed prior in the shape the scoring code reads it."""
+    cdef SEXP out, aid, forward, backward
+    cdef int i, n = len(prior.aid)
+
+    out = Rf_allocVector(VECSXP, 5)
+    Rf_SET_VECTOR_ELT(out, 0, _str_vector(prior.frm))
+    Rf_SET_VECTOR_ELT(out, 1, _str_vector(prior.to))
+
+    aid = Rf_allocVector(INTSXP, n)
+    forward = Rf_allocVector(REALSXP, n)
+    backward = Rf_allocVector(REALSXP, n)
+    for i in range(n):
+        INTEGER(aid)[i] = prior.aid[i]
+        REAL(forward)[i] = prior.forward[i]
+        REAL(backward)[i] = prior.backward[i]
+
+    Rf_SET_VECTOR_ELT(out, 2, aid)
+    Rf_SET_VECTOR_ELT(out, 3, forward)
+    Rf_SET_VECTOR_ELT(out, 4, backward)
+    Rf_setAttrib(out, R_NamesSymbol,
+                 _str_vector(["from", "to", "aid", "fwd", "bkwd"]))
+    Rf_setAttrib(out, Rf_install(b"nodes"), _str_vector(prior.nodes))
+    return out
+
+
+cdef SEXP _marginal_sexp(object prior) except? NULL:
+    cdef SEXP out = Rf_allocVector(REALSXP, 1)
+    REAL(out)[0] = prior.beta
+    Rf_setAttrib(out, Rf_install(b"nodes"), _str_vector(prior.nodes))
+    return out

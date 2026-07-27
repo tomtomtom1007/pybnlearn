@@ -87,6 +87,15 @@ pybnlearn.bn_cv(data, "hc", k=10).mean
 
 # constraints
 pybnlearn.hc(data, whitelist=[("A", "F")], blacklist=[("A", "B")], maxp=3)
+
+# graph priors: what you believe about the structure before seeing the data.
+# A whitelist forces an arc; a prior only leans on it, so on data this
+# decisive all three still land on the network above -- the scores differ.
+pybnlearn.score(net, data, type="bde", prior="vsp", beta=0.1)
+pybnlearn.score(net, data, type="bde", prior="marginal", beta=0.9)
+pybnlearn.score(net, data, type="bde", prior="cs", beta=pd.DataFrame(
+    {"from": ["A", "B"], "to": ["B", "C"], "prob": [0.9, 0.05]}))
+pybnlearn.hc(data, score="bde", prior="vsp", beta=0.1)
 ```
 
 ### Two notes on `pandas.read_csv` and categorical data
@@ -141,13 +150,17 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Resampling | `boot_strength`, `bn_boot`, `bn_cv`, `loss` — bootstrap arc strengths, a bootstrap distribution for any statistic, k-fold / hold-out / custom-fold cross-validation, all six losses |
 | Arc strength | `arc_strength` (p-value or score difference), `bf_strength` (Bayes factors), `custom_strength`, `averaged_network`, `inclusion_threshold` |
 | Interchange formats | `read_bif`, `read_dsc`, `read_net`, `write_bif`, `write_dsc`, `write_net`, `write_dot` |
+| Graph priors | `uniform`, `vsp`, `marginal`, `cs` (Castelo & Siebes) — passed to any Bayesian score as `prior=` and `beta=` |
 | Utilities | `score`, `modelstring`, `identifiable`, `singular`, `whitelist`, `blacklist`, `ntests` |
 
-137 of bnlearn's 160 exported functions are covered.  The 16 that remain
-are the plotting functions and the conversions to igraph, graphNEL, gRain
-and `lm`, which are deliberately out of scope: they would be rewrites rather
-than ports, with nothing to check against.  Non-uniform graph priors are the
-only piece of substance left.
+137 of bnlearn's 160 exported functions are covered.  Fifteen of the
+remaining twenty-three are deliberately out of scope -- the nine plotting
+functions and the six conversions to igraph, graphNEL, gRain and `lm` --
+because they would be rewrites rather than ports, with nothing to check
+against.  Six more are R's assignment forms (`nodes<-`, `arcs<-`,
+`parents<-`, `children<-`, `modelstring<-`, `alst<-`), whose effect is
+available here as ordinary functions.  That leaves `amat` and `amat<-`, the
+adjacency-matrix accessor, genuinely unported.
 
 Three things are deliberately not reproduced, and each is documented where
 it lives.  `direct_lingam` gives R's causal *ordering* exactly, but picks
@@ -164,13 +177,16 @@ total with the corrected value.
 Exact inference covers discrete and Gaussian networks, but not mixtures of
 the two.
 
-Plotting and the conversions to igraph, graphNEL and gRain are deliberately
-out of scope: they would be rewrites rather than ports, with nothing to
-check against.
+One inconsistency *is* reproduced rather than smoothed over, because
+smoothing it over would be the divergence: `bdj` accepts `prior` and `beta`
+and then ignores them, scoring as if the prior were uniform -- while still
+being reported as non-decomposable under `cs` and `marginal`, which moves
+the search even though the score stands still.  pybnlearn does the same, and
+the fixtures pin down both halves of it.
 
 ## Verified against R
 
-`pytest` runs 3554 checks, 3449 of which compare directly against values produced
+`pytest` runs 3805 checks, 3694 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -258,6 +274,13 @@ by R 4.6.1 with bnlearn 5.2.1:
   hill-climbing restarts built on them, every extension of an equivalence
   class, exact graph counts, Bayes-factor arc strengths in extended
   precision, deduplication, and bootstrapping an arbitrary statistic;
+* 235 results for the non-uniform graph priors: four Castelo & Siebes
+  completions, and nine prior settings crossed with three data sets, five
+  scores and both `hc` and `tabu` -- which is what pins down the
+  non-decomposable path, since a prior that touches every node makes a
+  move's effect wider than its cached delta.  `hc` and `tabu` are expected
+  to disagree with each other under the marginal prior, and do, on the same
+  pair of networks R's do;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -292,6 +315,7 @@ Rscript tools/gen_r_missing_fixtures.R   # also needs gRain
 Rscript tools/gen_r_causal_fixtures.R
 Rscript tools/gen_r_lingam_fixtures.R
 Rscript tools/gen_r_misc_fixtures.R      # also needs gmp and Rmpfr
+Rscript tools/gen_r_priors_fixtures.R
 ```
 
 ## Performance
