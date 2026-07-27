@@ -10,13 +10,15 @@ Licensed under the GNU General Public License version 3 or later.
 
 from __future__ import annotations
 
+import itertools
 import re
 
 from ._core import (chow_liu_arcs, aracne_arcs, components, count_parameters,
                     cpdag_arcs, extend_pdag, structural_hamming,
                     tier_blacklist, topological_order, undirected_arcs)
-from ._core import (collider_triples, consistent_extension, deduplicate_arcs,
-                    ide_cozman_graphs, intervention_distance, ordered_graphs)
+from ._core import (collider_triples, complement_arcs, consistent_extension,
+                    deduplicate_arcs, ide_cozman_graphs,
+                    intervention_distance, ordered_graphs, sample_indices)
 from ._core import acyclic as _acyclic
 from ._core import path_exists as _path_exists
 from .structure import BayesianNetwork, _data_type, build_blacklist
@@ -25,7 +27,8 @@ __all__ = [
     "aracne", "chow_liu", "compare", "cpdag", "empty_graph", "hamming",
     "model2network", "moral", "nparams", "pdag2dag", "shd", "skeleton",
     "subgraph",
-    "cextend", "colliders", "complete_graph", "dsep", "random_graph",
+    "cextend", "cextend_all", "colliders", "complete_graph", "count_graphs",
+    "dsep", "perturb", "random_graph",
     "shielded_colliders", "sid", "unshielded_colliders", "vstructs",
     "acyclic", "connected_components", "directed", "leaf_nodes",
     "node_ordering", "ordering2blacklist", "path_exists", "root_nodes",
@@ -687,3 +690,256 @@ def _one_or_many(arc_sets, nodes, method):
     graphs = [BayesianNetwork(nodes, arcs, {"algo": method})
               for arcs in arc_sets]
     return graphs[0] if len(graphs) == 1 else graphs
+
+
+# ---------------------------------------------------------------------------
+# perturbing a graph, and counting graphs
+# ---------------------------------------------------------------------------
+
+def perturb(x, nops, ops=("set", "drop", "reverse"), maxp=float("inf")):
+    """Randomly change a few arcs.
+
+    Hill climbing uses this to restart: perturbing the network it settled on
+    and climbing again is how it escapes a local optimum.  Every choice --
+    which operation, which arc -- is a draw from R's generator, so seed with
+    `set_seed()` and the same perturbation comes out.
+
+    An attempt only counts once the graph has actually moved away from the
+    one it started as -- an operation chosen when no legal arc is available
+    for it, or one that puts the graph back where it began, is free.  That
+    is why the loop is bounded at three times `nops` rather than exactly
+    `nops`.
+    """
+    net = _as_graph(x)
+    nops = int(nops)
+    if nops < 1:
+        raise ValueError("the number of operations must be a positive integer")
+
+    ops = [str(o) for o in ops]
+    unknown = [o for o in ops if o not in ("set", "drop", "reverse")]
+    if unknown:
+        raise ValueError("the operations must be 'set', 'drop' or 'reverse'")
+
+    nodes = list(net.nodes)
+    arcs = list(net.arcs)
+    whitelist = list(net.learning.get("whitelist") or ())
+    blacklist = list(net.learning.get("blacklist") or ())
+
+    original = list(arcs)
+    remaining = nops
+
+    for _ in range(3 * nops):
+        if remaining == 0:
+            break
+
+        parents = {node: len(BayesianNetwork(nodes, arcs).parents(node))
+                   for node in nodes}
+
+        addable = [(a, b) for a, b in complement_arcs(arcs, nodes)
+                   if (a, b) not in blacklist and parents[b] < maxp]
+        droppable = [arc for arc in arcs if arc not in whitelist]
+        reversible = [(a, b) for a, b in arcs
+                      if (b, a) not in blacklist and parents[a] < maxp]
+
+        # the operation is chosen before it is known to be possible, and a
+        # choice that turns out to be impossible still costs an attempt.
+        operation = ops[int(sample_indices(len(ops), 1, replace=True)[0]) - 1]
+
+        if operation == "set" and addable:
+            frm, to = addable[
+                int(sample_indices(len(addable), 1, replace=True)[0]) - 1]
+            if not _path_exists(nodes, arcs, to, frm, direct=True):
+                arcs = _set_direction(arcs, frm, to)
+        elif operation == "drop" and droppable:
+            frm, to = droppable[
+                int(sample_indices(len(droppable), 1, replace=True)[0]) - 1]
+            arcs = [arc for arc in arcs if arc not in ((frm, to), (to, frm))]
+        elif operation == "reverse" and reversible:
+            frm, to = reversible[
+                int(sample_indices(len(reversible), 1, replace=True)[0]) - 1]
+            if not _path_exists(nodes, arcs, frm, to, direct=False):
+                arcs = [arc for arc in arcs if arc != (frm, to)] + [(to, frm)]
+
+        # the comparison is against the network as it arrived, not against
+        # the previous pass: an operation that undoes an earlier one gives
+        # the budget back.
+        if arcs != original:
+            remaining -= 1
+
+    return BayesianNetwork(nodes, arcs, dict(net.learning))
+
+
+def _set_direction(arcs, frm, to):
+    """set.arc.direction() on a bare arc list."""
+    present = set(arcs)
+    if (to, frm) in present and (frm, to) in present:
+        return [arc for arc in arcs if arc != (to, frm)]
+    if (to, frm) in present:
+        return [arc for arc in arcs if arc != (to, frm)] + [(frm, to)]
+    if (frm, to) in present:
+        return list(arcs)
+    return list(arcs) + [(frm, to)]
+
+
+def cextend_all(x):
+    """Every DAG in the equivalence class, not just one.
+
+    `cextend` returns one consistent extension; this returns all of them,
+    which is how you find out how much the data left undecided.  The count
+    grows very fast with the size of the undirected part, so this is for
+    small graphs.
+    """
+    net = _as_graph(x)
+    present = set(net.arcs)
+
+    loose = [(a, b) for a, b in net.arcs if (b, a) in present]
+    firm = [(a, b) for a, b in net.arcs if (b, a) not in present]
+
+    if not loose:
+        return [BayesianNetwork(net.nodes, net.arcs, dict(net.learning))]
+
+    # only the nodes the undirected part touches matter; the rest are along
+    # for the ride.
+    touched = sorted({n for arc in loose for n in arc},
+                     key=list(net.nodes).index)
+
+    orientations = []
+    for ordering in itertools.permutations(touched):
+        rank = {node: i for i, node in enumerate(ordering)}
+        oriented = {(a, b) if rank[a] < rank[b] else (b, a)
+                    for a, b in loose}
+
+        candidate = BayesianNetwork(net.nodes, sorted(oriented) + firm)
+        # an extension may not introduce a v-structure the class does not
+        # have, which is what makes this the equivalence class rather than
+        # every acyclic orientation.
+        if set(cpdag(candidate).arcs) != present:
+            continue
+
+        key = tuple(sorted(oriented))
+        if key not in orientations:
+            orientations.append(key)
+
+    return [BayesianNetwork(net.nodes, list(o) + firm, dict(net.learning))
+            for o in orientations]
+
+
+def count_graphs(type="all-dags", nodes=None, k=None, r=None, eqclass=None):
+    """How many graphs of a given kind there are on n nodes.
+
+    Exact, with Python's own big integers -- the counts outrun a double at
+    about nine nodes, and outrun anything printable soon after.
+
+    Parameters
+    ----------
+    type : str
+        "all-dags", "dags-given-ordering", "dags-with-k-roots",
+        "dags-with-r-arcs", or "dags-in-equivalence-class".
+    nodes : int or sequence of int
+        How many nodes.
+    k, r : int
+        The number of roots or of arcs, for the counts that need one.
+    eqclass : BayesianNetwork
+        For "dags-in-equivalence-class".
+    """
+    if type == "dags-in-equivalence-class":
+        if eqclass is None:
+            raise ValueError("this count needs an equivalence class")
+        return len(cextend_all(eqclass))
+
+    if nodes is None:
+        raise ValueError("this count needs the number of nodes")
+    wanted = [nodes] if isinstance(nodes, int) else [int(n) for n in nodes]
+    biggest = max(wanted)
+
+    if type == "dags-given-ordering":
+        # with the ordering fixed, every arc it allows is free to be there
+        # or not, independently.
+        counts = [1] + [2 ** _binomial(i, 2) for i in range(1, biggest + 1)]
+    elif type == "all-dags":
+        counts = _count_all_dags(biggest)
+    elif type == "dags-with-k-roots":
+        if k is None:
+            raise ValueError("this count needs the number of roots")
+        counts = _count_by_roots(biggest, int(k))
+    elif type == "dags-with-r-arcs":
+        if r is None:
+            raise ValueError("this count needs the number of arcs")
+        counts = _count_by_arcs(biggest, int(r))
+    else:
+        raise ValueError(f"unknown count {type!r}")
+
+    values = [counts[n] for n in wanted]
+    return values[0] if len(values) == 1 else values
+
+
+def _binomial(n, k):
+    from math import comb
+
+    return comb(n, k) if 0 <= k <= n else 0
+
+
+def _count_all_dags(n):
+    """Robinson's recursion, inclusion-exclusion over the root set."""
+    a = [1] + [0] * n
+    for i in range(1, n + 1):
+        total = 0
+        for k in range(i, 0, -1):
+            sign = 1 if (k - 1) % 2 == 0 else -1
+            total += sign * _binomial(i, k) * 2 ** (k * (i - k)) * a[i - k]
+        a[i] = total
+    return a
+
+
+def _count_by_roots(n, k):
+    """Graphs with exactly k roots.
+
+    Peel the roots off: choose which j of the i nodes they are, then count
+    the graphs on the remaining i - j, weighted by how many ways the roots
+    can attach.  A node that used to be a root has to gain at least one
+    parent among the new ones -- that is the (2^j - 1) factor -- while the
+    rest may gain any.
+    """
+    if k > n:
+        return [0] * (n + 1)
+
+    a = [None] + [[0] * (i + 1) for i in range(1, n + 1)]
+
+    for i in range(1, n + 1):
+        for j in range(1, i + 1):
+            if i == j:
+                # every node a root means no arcs at all.
+                a[i][j] = 1
+                continue
+
+            total = 0
+            for m in range(1, i - j + 1):
+                to_old_roots = (2 ** j - 1) ** m
+                to_old_nonroots = 2 ** (j * (i - m - j))
+                total += to_old_roots * to_old_nonroots * a[i - j][m]
+
+            a[i][j] = total * _binomial(i, j)
+
+    return [0 if i < k else a[i][k] for i in range(n + 1)]
+
+
+def _count_by_arcs(n, r):
+    """Graphs with exactly r arcs, by the same inclusion-exclusion carried
+    over the arc count as well."""
+    biggest = max(_binomial(n, 2), r)
+    a = [[0] * (biggest + 1) for _ in range(n + 1)]
+    a[0][0] = 1
+
+    for i in range(1, n + 1):
+        a[i][0] = 1
+        for j in range(1, min(r, _binomial(i, 2)) + 1):
+            total = 0
+            for m in range(1, i):
+                sign = 1 if (m - 1) % 2 == 0 else -1
+                inner = 0
+                for kk in range(0, min(j, _binomial(i - m, 2)) + 1):
+                    inner += _binomial(m * (i - m), j - kk) * a[i - m][kk]
+                total += sign * _binomial(i, m) * inner
+            a[i][j] = total
+
+    return [row[r] if r <= biggest else 0 for row in a]

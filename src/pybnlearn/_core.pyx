@@ -2657,3 +2657,73 @@ def deduplicate_arcs(arcs, node_names):
         return _arcs_from_sexp(_guarded(<void *>unique_arcs, a, 3))
     finally:
         pybn_arena_pop()
+
+
+# ---------------------------------------------------------------------------
+# the test counter, and deduplication
+# ---------------------------------------------------------------------------
+
+# The counter routines are renamed on this side: they take no arguments, so
+# they cannot go through the guarded call (which dispatches on arity 1 to
+# 16), and they cannot raise an R error either -- they only touch an int.
+cdef extern SEXP c_get_test_counter "get_test_counter" ()
+cdef extern SEXP c_reset_test_counter "reset_test_counter" ()
+cdef extern SEXP c_increment_test_counter "increment_test_counter" (SEXP n)
+cdef extern SEXP dedup(SEXP data, SEXP threshold, SEXP complete, SEXP debug)
+
+
+def test_counter():
+    """How many tests or scores have been evaluated since the last reset."""
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        return int(_sexp_to_py(c_get_test_counter()))
+    finally:
+        pybn_arena_pop()
+
+
+def reset_test_counter():
+    """Set the counter back to zero."""
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        c_reset_test_counter()
+    finally:
+        pybn_arena_pop()
+
+
+def increment_test_counter(int n=1):
+    """Add to the counter, for work the C code does not count itself."""
+    cdef SEXP amount
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        amount = Rf_ScalarReal(n)
+        # the C returns NULL rather than the new value.
+        c_increment_test_counter(amount)
+        return int(_sexp_to_py(c_get_test_counter()))
+    finally:
+        pybn_arena_pop()
+
+
+def dedup_columns(data, double threshold):
+    """dedup(): drop variables that are almost perfectly correlated with an
+    earlier one."""
+    cdef SEXP a[4]
+    cdef SEXP complete
+    cdef int i
+
+    _ensure_init()
+    pybn_arena_push()
+    try:
+        a[0] = _dataframe(data)
+        a[1] = Rf_ScalarReal(threshold)
+        complete = Rf_allocVector(LGLSXP, data.shape[1])
+        for i, name in enumerate(data.columns):
+            LOGICAL(complete)[i] = 0 if data[name].isna().any() else 1
+        a[2] = complete
+        a[3] = Rf_ScalarLogical(0)
+        return _dataframe_to_py(_guarded(<void *>dedup, a, 4))
+    finally:
+        pybn_arena_pop()

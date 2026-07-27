@@ -26,7 +26,7 @@ import pytest
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
 # data sets whose columns are all numeric
-CONTINUOUS = {"gaussian.test", "marks", "nongaussian"}
+CONTINUOUS = {"gaussian.test", "marks", "nongaussian", "redundant"}
 
 # data sets that mix factors with numeric columns, where which is which has to
 # be inferred per column rather than declared for the whole frame

@@ -114,7 +114,7 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 |---|---|
 | Conditional independence tests | `mi`, `mi-adf`, `mi-sh`, `x2`, `x2-adf` (discrete); `cor`, `zf`, `mi-g`, `mi-g-sh` (Gaussian) |
 | Scores | `loglik`, `aic`, `bic`, `bde`, `bds`, `bdj`, `k2`, `fnml`, `qnml`; `loglik-g`, `aic-g`, `bic-g`, `bge`; `loglik-cg`, `aic-cg`, `bic-cg`, `ebic-cg` |
-| Structure learning (score-based) | `hc`, `tabu` — whitelists, blacklists, `maxp`, arbitrary starting networks |
+| Structure learning (score-based) | `hc`, `tabu` — whitelists, blacklists, `maxp`, arbitrary starting networks, random restarts |
 | Structure learning (constraint-based) | `pc_stable`, `gs`, `iamb`, `inter_iamb`, `iamb_fdr`, `fast_iamb`, `mmpc`, `si_hiton_pc`, `hpc` — whitelists, blacklists, `alpha`, `max_sx`, `undirected` |
 | Structure learning (local) | `learn_mb`, `learn_nbr` — one node's Markov blanket or neighbourhood, without the whole network |
 | Structure learning (hybrid) | `mmhc`, `h2pc`, `rsmax2` — any ported restrict/maximize pair |
@@ -125,9 +125,9 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Comparison | `shd`, `hamming`, `compare`, `nparams`, `sid` |
 | Information | `H` (entropy), `KL` (divergence), `BF` (Bayes factor), `alpha_star` |
 | Graph properties | `acyclic`, `directed`, `valid_dag`, `valid_cpdag`, `valid_ug`, `path_exists`, `connected_components`, `node_ordering`, `dsep` |
-| Colliders and equivalence | `colliders`, `vstructs`, `shielded_colliders`, `unshielded_colliders`, `cextend` |
-| Generating graphs | `random_graph` (ordered, ic-dag, melancon), `complete_graph`, `empty_graph` |
-| Preprocessing | `discretize` (quantile, interval, Hartemink), `configs` |
+| Colliders and equivalence | `colliders`, `vstructs`, `shielded_colliders`, `unshielded_colliders`, `cextend`, `cextend_all` |
+| Generating graphs | `random_graph` (ordered, ic-dag, melancon), `complete_graph`, `empty_graph`, `perturb`, `count_graphs` |
+| Preprocessing | `discretize` (quantile, interval, Hartemink), `configs`, `dedup` |
 | Nodes and arcs | `parents`, `children`, `mb`, `nbr`, `spouses`, `ancestors`, `descendants`, `root_nodes`, `leaf_nodes`, `isolated_nodes`, `degree`, `in_degree`, `out_degree`, `arcs`, `narcs`, `nnodes`, `directed_arcs`, `undirected_arcs`, `incoming_arcs`, `outgoing_arcs`, `incident_arcs`, `compelled_arcs`, `reversible_arcs` |
 | Editing a graph | `set_arc`, `drop_arc`, `reverse_arc`, `set_edge`, `drop_edge`, `add_node`, `remove_node`, `rename_nodes` |
 | Constraints from orderings | `ordering2blacklist`, `tiers2blacklist`, `set2blacklist` |
@@ -138,23 +138,29 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Gaussian networks as distributions | `gbn2mvnorm`, `mvnorm2gbn` — the global mean and covariance, and the factorisation back |
 | Classifiers | `naive_bayes`, `tree_bayes`, `classify` — exact class posteriors |
 | Simulation and inference | `rbn`, `cpquery`, `cpdist` — logic sampling and likelihood weighting; `set_seed` reproduces R's `set.seed` |
-| Resampling | `boot_strength`, `bn_cv` — bootstrap arc strengths, k-fold / hold-out / custom-fold cross-validation, all six losses |
-| Arc strength | `arc_strength` (p-value or score difference), `custom_strength`, `averaged_network`, `inclusion_threshold` |
+| Resampling | `boot_strength`, `bn_boot`, `bn_cv`, `loss` — bootstrap arc strengths, a bootstrap distribution for any statistic, k-fold / hold-out / custom-fold cross-validation, all six losses |
+| Arc strength | `arc_strength` (p-value or score difference), `bf_strength` (Bayes factors), `custom_strength`, `averaged_network`, `inclusion_threshold` |
 | Interchange formats | `read_bif`, `read_dsc`, `read_net`, `write_bif`, `write_dsc`, `write_net`, `write_dot` |
 | Utilities | `score`, `modelstring`, `identifiable`, `singular`, `whitelist`, `blacklist`, `ntests` |
 
-126 of bnlearn's 160 exported functions are covered.  Still to do:
-`perturb` and so random restarts for `hc`, `bn.boot`, `loss`,
-`count.graphs`, `cextend.all`, `bf.strength`, `dedup`, and non-uniform graph
-priors.
+137 of bnlearn's 160 exported functions are covered.  The 16 that remain
+are the plotting functions and the conversions to igraph, graphNEL, gRain
+and `lm`, which are deliberately out of scope: they would be rewrites rather
+than ports, with nothing to check against.  Non-uniform graph priors are the
+only piece of substance left.
 
-Two things are deliberately not reproduced, and both are documented where
-they live.  `direct_lingam` gives R's causal *ordering* exactly, but picks
+Three things are deliberately not reproduced, and each is documented where
+it lives.  `direct_lingam` gives R's causal *ordering* exactly, but picks
 the arcs with a score-based search rather than with glmnet's adaptive lasso,
-which is not vendored.  And `mi = "gkernel"` raises rather than returning a
+which is not vendored.  `mi = "gkernel"` raises rather than returning a
 number: bnlearn builds its Gram matrix with a matrix product where it means
 an elementwise one, leaving a condition number around 1e20, so R's own
-answer is floating-point noise and cannot be reproduced by anything.
+answer is floating-point noise and cannot be reproduced by anything.  And
+`count_graphs("dags-with-r-arcs", r = 0)` returns one rather than R's *n*:
+R's inner loop runs `seq(from = 1, to = 0)`, which counts downwards, and the
+extra pass overwrites the count -- unlike the other two this one is
+checkable, and the counts for a given number of nodes only add up to the
+total with the corrected value.
 Exact inference covers discrete and Gaussian networks, but not mixtures of
 the two.
 
@@ -164,7 +170,7 @@ check against.
 
 ## Verified against R
 
-`pytest` runs 3398 checks, 3310 of which compare directly against values produced
+`pytest` runs 3554 checks, 3449 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -248,6 +254,10 @@ by R 4.6.1 with bnlearn 5.2.1:
   its own feeding both copies;
 * 18 LiNGAM causal orderings, including a data set with genuinely
   non-Gaussian noise, which is the assumption the method rests on;
+* 139 results for the remaining utilities: seeded perturbations and the
+  hill-climbing restarts built on them, every extension of an equivalence
+  class, exact graph counts, Bayes-factor arc strengths in extended
+  precision, deduplication, and bootstrapping an arbitrary statistic;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -281,6 +291,7 @@ Rscript tools/gen_r_hpc_fixtures.R
 Rscript tools/gen_r_missing_fixtures.R   # also needs gRain
 Rscript tools/gen_r_causal_fixtures.R
 Rscript tools/gen_r_lingam_fixtures.R
+Rscript tools/gen_r_misc_fixtures.R      # also needs gmp and Rmpfr
 ```
 
 ## Performance

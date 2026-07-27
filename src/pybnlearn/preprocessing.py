@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ._core import configuration_factor, discretize_joint, discretize_marginal
+from ._core import (configuration_factor, dedup_columns,
+                    discretize_joint, discretize_marginal)
 
-__all__ = ["configs", "discretize"]
+__all__ = ["configs", "dedup", "discretize"]
 
 _METHODS = ("quantile", "interval", "hartemink")
 
@@ -108,6 +109,23 @@ def _default_ibreaks(n):
     if n > 10:
         return 5
     return n
+
+
+def dedup(data, threshold=0.90):
+    """Drop variables that say the same thing as an earlier one.
+
+    Two variables correlated above the threshold carry the same information
+    for a network's purposes, and keeping both makes the regressions
+    singular.  The *earlier* of the pair is kept, so the column order
+    decides which survives.
+    """
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas DataFrame")
+    if not 0 <= threshold <= 1:
+        raise ValueError("the correlation threshold must be in [0, 1]")
+
+    kept = dedup_columns(data, float(threshold))
+    return pd.DataFrame(kept, columns=list(kept), index=data.index)
 
 
 def configs(data, all=True):

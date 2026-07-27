@@ -381,7 +381,7 @@ def score(network, data, type=None, by_node=False, **extra_args):
 
 def hc(data, start=None, whitelist=None, blacklist=None, score=None,
        max_iter=float("inf"), maxp=float("inf"), optimized=True,
-       restart=0, **extra_args):
+       restart=0, perturb=1, **extra_args):
     """Learn a network structure by hill climbing, as bnlearn's hc() does.
 
     Parameters
@@ -399,6 +399,13 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
         The largest number of parents any node may have.
     optimized : bool
         Reuse cached score deltas between iterations. Only affects speed.
+    restart : int
+        How many times to perturb the network it settles on and climb
+        again, keeping the best result.  This is how hill climbing escapes a
+        local optimum, and the perturbations come from R's generator -- seed
+        with `set_seed()`.
+    perturb : int
+        How many arcs to change at each restart.
     **extra_args
         Score hyperparameters, e.g. ``iss=10`` for bde or ``k=1`` for bic.
 
@@ -410,10 +417,12 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
         raise TypeError("data must be a pandas DataFrame")
     if data.shape[1] < 2:
         raise ValueError("at least two variables are needed")
-    if restart:
-        raise NotImplementedError(
-            "random restarts are not implemented yet; the perturbation "
-            "backend still has to be ported")
+    restart = int(restart)
+    if restart < 0:
+        raise ValueError("restart must be a non-negative integer")
+    perturb = int(perturb)
+    if restart and perturb < 1:
+        raise ValueError("perturb must be a positive integer")
 
     _check_complete(data)
 
@@ -461,6 +470,11 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
         updated = list(range(n))
         iterations = 0
 
+        # random restarts: the best network seen so far, kept aside so that
+        # a restart that goes badly can be discarded.
+        best_arcs = best_total = None
+        restarts_left = restart
+
         while True:
             amat = search.arcs_to_amat(arcs)
             nparents = amat.sum(axis=0).astype(np.float64)
@@ -478,7 +492,62 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
             best = search.best_step(amat, candidates, nparents, maxp)
 
             if best is None:
-                break
+                if not restart or restarts_left < 0:
+                    break
+
+                total = float(np.sum(search.get_reference()))
+
+                if restarts_left == restart:
+                    # the first time through, there is nothing to compare
+                    # against yet.
+                    best_arcs, best_total = list(arcs), total
+                    reverted = False
+                elif _robust_score_difference(best_total, total) > 0:
+                    # the restart made things worse; go back and perturb the
+                    # network we came from instead.
+                    arcs = list(best_arcs)
+                    reverted = True
+                else:
+                    best_arcs, best_total = list(arcs), total
+                    reverted = False
+
+                if restarts_left == 0:
+                    break
+                if iterations >= max_iter:
+                    break
+
+                iterations += 1
+                restarts_left -= 1
+
+                from .graph import perturb as _perturb
+
+                before = {node: set(BayesianNetwork(nodes, arcs).parents(node))
+                          for node in nodes}
+                arcs = _perturb(
+                    BayesianNetwork(nodes, arcs,
+                                    {"whitelist": list(whitelist or ()),
+                                     "blacklist": list(blacklist or ())}),
+                    perturb, maxp=maxp).arcs
+                after = {node: set(BayesianNetwork(nodes, arcs).parents(node))
+                         for node in nodes}
+
+                if reverted:
+                    # everything moved: the network being perturbed is not
+                    # the one the reference scores describe.
+                    search.set_reference(search.node_scores(arcs, nodes))
+                    updated = list(range(n))
+                else:
+                    touched = [node for node in nodes
+                               if before[node] != after[node]]
+                    if touched:
+                        reference = search.get_reference()
+                        fresh = search.node_scores(arcs, touched)
+                        for name, value in zip(touched, fresh):
+                            reference[index[name]] = value
+                        search.set_reference(reference)
+                    updated = [index[node] for node in touched]
+
+                continue
 
             frm, to, op = best["from"], best["to"], best["op"]
             arcs = _apply(arcs, op, frm, to)

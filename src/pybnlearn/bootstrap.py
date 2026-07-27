@@ -21,7 +21,8 @@ from . import constraint, graph, hybrid, structure
 from .fit import DiscreteNode, fit, predict
 from .structure import BayesianNetwork, _check_complete
 
-__all__ = ["CrossValidation", "bn_cv", "boot_strength"]
+__all__ = ["CrossValidation", "bn_boot", "bn_cv", "boot_strength",
+           "loss"]
 
 
 _ALGORITHMS = {
@@ -422,3 +423,60 @@ def bn_cv(data, bn, loss=None, k=10, m=None, method="k-fold", folds=None,
                                 levels)
 
     return CrossValidation(results, loss, method, mean)
+
+
+def loss(result):
+    """The loss a cross-validation run measured.
+
+    A single run has one; a list of runs has one each, which is how the
+    results of several `bn_cv` calls are compared.
+    """
+    if isinstance(result, CrossValidation):
+        return result.mean
+    if isinstance(result, (list, tuple)):
+        return [loss(r) for r in result]
+
+    raise TypeError("loss() needs the result of bn_cv()")
+
+
+def bn_boot(data, statistic, replicates=200, m=None, algorithm="hc",
+            algorithm_args=None, statistic_args=None):
+    """Apply a statistic to networks learned from bootstrap samples.
+
+    The general form of `boot_strength`: instead of counting arcs, it hands
+    each learned network to a function of yours and collects the answers.
+    That is how you get a bootstrap distribution for anything a network has
+    -- the number of arcs, a particular node's parents, a score.
+
+    Seed with `set_seed()`; the resamples come from R's generator, so the
+    same seed draws the same rows in the same order R draws them.
+    """
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("data must be a pandas DataFrame")
+    if algorithm not in _ALGORITHMS:
+        raise ValueError(
+            f"unknown algorithm {algorithm!r}; available are "
+            + ", ".join(sorted(_ALGORITHMS)))
+    if not callable(statistic):
+        raise TypeError("statistic must be callable")
+
+    replicates = int(replicates)
+    if replicates < 1:
+        raise ValueError("replicates must be a positive integer")
+
+    nrow = len(data)
+    m = nrow if m is None else int(m)
+    if not 0 < m <= nrow:
+        raise ValueError("m must be between 1 and the number of rows")
+
+    learn = _ALGORITHMS[algorithm]
+
+    out = []
+    for _ in range(replicates):
+        rows = sample_indices(nrow, m, replace=True)
+        replicate = data.iloc[rows - 1]
+
+        network = learn(replicate, **(algorithm_args or {}))
+        out.append(statistic(network, **(statistic_args or {})))
+
+    return out

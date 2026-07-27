@@ -33,8 +33,8 @@ from ._core import Search, Tester, averaged_arcs, which_arcs_undirected
 from .structure import (BayesianNetwork, _check_complete, _check_score,
                         _check_score_args, _data_type)
 
-__all__ = ["arc_strength", "averaged_network", "custom_strength",
-           "inclusion_threshold"]
+__all__ = ["arc_strength", "averaged_network", "bf_strength",
+           "custom_strength", "inclusion_threshold"]
 
 
 def arc_strength(network, data, criterion=None, alpha=0.05, **extra_args):
@@ -478,3 +478,133 @@ _TESTS = frozenset({
     "mi", "mi-adf", "mi-sh", "x2", "x2-adf", "mc-mi", "smc-mi",
     "cor", "zf", "mi-g", "mi-g-sh",
 })
+
+
+def _bayes_factors(network, data, nodes, type, extra):
+    """One Bayes factor per pair of nodes, in the installed decimal context.
+
+    For each pair: the marginal likelihood with the arc one way, the other
+    way, and not at all.  Normalising the three gives a probability that the
+    arc is there and, given that, which way it points.
+    """
+    import decimal
+    import itertools
+
+    from .graph import path_exists
+
+    one = decimal.Decimal(1)
+    zeros = np.zeros((len(nodes), len(nodes)), dtype=np.int32)
+    strength, direction = {}, {}
+
+    with Search(data, nodes, type, extra, zeros, zeros) as search:
+        for first, second in itertools.combinations(network.nodes, 2):
+            without = [arc for arc in network.arcs
+                       if arc not in ((first, second), (second, first))]
+            base = dict(zip([first, second],
+                            search.node_scores(without, [first, second])))
+
+            def weight(frm, to):
+                # An arc that would close a cycle is not a candidate at all.
+                # The check is against the *original* network, not the one
+                # with this pair's arc removed: R does it that way, and it
+                # is the network the strengths are relative to.
+                if path_exists(network, to, frm, direct=False):
+                    return decimal.Decimal(0)
+
+                added = without + [(frm, to)]
+                updated = float(search.node_scores(added, [to])[0])
+
+                # a numpy scalar's repr() carries its type name, which
+                # Decimal will not parse.
+                delta = float(updated - base[to])
+                if not np.isfinite(delta):
+                    return decimal.Decimal(0)
+
+                return decimal.Decimal(repr(delta)).exp()
+
+            forward = weight(first, second)
+            backward = weight(second, first)
+
+            total = one + forward + backward
+            if not total.is_finite():
+                # every finite weight is discarded and the mass spread over
+                # the infinite ones, as R does.
+                infinite = [w for w in (backward, one, forward)
+                            if not w.is_finite()]
+                share = one / len(infinite)
+                forward = backward = share
+                total = one
+
+            strength[first, second] = float((forward + backward) / total)
+            direction[first, second] = (
+                0.0 if (one / total) == 1
+                else float(forward / (forward + backward)))
+
+    return strength, direction
+
+
+def bf_strength(network, data, type=None, **extra_args):
+    """Arc strengths from Bayes factors, without resampling.
+
+    `boot_strength` learns hundreds of networks to find out how often an arc
+    appears.  This asks the same question of a single network by comparing,
+    for each pair of nodes, the marginal likelihood with the arc one way,
+    the other way, and not at all -- and normalising the three.
+
+    The arithmetic is done in extended precision, as R's is.  A Bayes factor
+    between two networks routinely runs past 1e308, so the three unnormalised
+    weights overflow a double long before their ratio does.
+
+    Returns a DataFrame with one row per ordered pair, carrying both the
+    strength and the direction, so `averaged_network` accepts it directly.
+    """
+    import decimal
+
+    if not isinstance(network, BayesianNetwork):
+        raise TypeError("bf_strength() needs a BayesianNetwork")
+
+    _check_complete(data)
+
+    nodes = [str(c) for c in data.columns]
+    if set(nodes) != set(network.nodes):
+        raise ValueError("the network and the data have different variables")
+    if _undirected(network):
+        raise ValueError("the graph is only partially directed")
+
+    if type is None:
+        type = {"discrete": "bde", "continuous": "bge",
+                "mixed-cg": "bic-cg"}[_data_type(data)]
+    type = _check_score(type, data)
+    extra = _check_score_args(type, data, extra_args)
+
+    # R works at 200 bits, which is about 60 decimal digits; the extra few
+    # here cost nothing and keep the rounding well below what a double sees.
+    #
+    # The context has to be *installed*, not merely used to build the
+    # numbers: Decimal's operators read the thread's context, which defaults
+    # to 28 digits.  At 28 digits, 1 + 4e-30 rounds to exactly 1, and the
+    # direction of every improbable arc comes out as a tie rather than as
+    # the near-certainty it is.
+    with decimal.localcontext() as context:
+        context.prec = 70
+        context.Emax = decimal.MAX_EMAX
+        context.Emin = decimal.MIN_EMIN
+
+        strength, direction = _bayes_factors(network, data, nodes, type,
+                                             extra)
+
+    rows = []
+    for frm in network.nodes:
+        for to in network.nodes:
+            if frm == to:
+                continue
+            key = (frm, to) if (frm, to) in strength else (to, frm)
+            forward = (direction[key] if key == (frm, to)
+                       else 1 - direction[key])
+            rows.append((frm, to, strength[key], forward))
+
+    result = pd.DataFrame(rows, columns=["from", "to", "strength",
+                                         "direction"])
+    result.attrs.update(nodes=nodes, method="bootstrap", criterion=type)
+    result.attrs["threshold"] = inclusion_threshold(result)
+    return result

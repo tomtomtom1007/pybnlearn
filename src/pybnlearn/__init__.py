@@ -5,8 +5,9 @@ layer that stands in for the R C API, so results agree with R rather than
 merely resembling them.  See NOTICE for attribution and licensing.
 """
 
-from ._core import BNLearnError, ci_test
-from .bootstrap import CrossValidation, bn_cv, boot_strength
+from ._core import (BNLearnError, ci_test, increment_test_counter,
+                    reset_test_counter, test_counter)
+from .bootstrap import CrossValidation, bn_boot, bn_cv, boot_strength, loss
 from .classifiers import classify, naive_bayes, tree_bayes
 from .causal import (StructuralCausalModel, as_bn, as_scm,
                      counterfactual, intervention, mutilated, twin)
@@ -24,25 +25,27 @@ from .inference import cpdist, cpquery, rbn, set_seed
 from .lingam import direct_lingam, lingam_ordering
 from .missing import impute, structural_em
 from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
-from .graph import (acyclic, aracne, cextend, chow_liu, colliders, compare,
-                    complete_graph, connected_components, cpdag, directed,
-                    dsep, empty_graph, hamming, leaf_nodes,
+from .graph import (acyclic, aracne, cextend, cextend_all, chow_liu,
+                    colliders, compare, complete_graph, connected_components,
+                    count_graphs, cpdag, directed, dsep, empty_graph, hamming,
+                    leaf_nodes, perturb,
                     model2network, moral, node_ordering, nparams,
                     ordering2blacklist, path_exists, pdag2dag, root_nodes,
                     random_graph, set2blacklist, shd, shielded_colliders,
                     sid, skeleton, subgraph, tiers2blacklist,
                     unshielded_colliders, valid_cpdag, valid_dag, valid_ug,
                     vstructs)
-from .nodes import (add_node, ancestors, arcs, children, compelled_arcs,
+from .nodes import (add_node, alst, ancestors, arcs, children,
+                    compelled_arcs,
                     degree, descendants, directed_arcs, drop_arc, drop_edge,
                     in_degree, incident_arcs, incoming_arcs, isolated_nodes,
                     mb, narcs, nbr, nnodes, out_degree, outgoing_arcs,
                     parents, remove_node, rename_nodes, reverse_arc,
                     reversible_arcs, set_arc, set_edge, spouses,
                     undirected_arcs)
-from .strength import (arc_strength, averaged_network,
+from .strength import (arc_strength, averaged_network, bf_strength,
                        custom_strength, inclusion_threshold)
-from .preprocessing import configs, discretize
+from .preprocessing import configs, dedup, discretize
 from .structure import (BF, BayesianNetwork, alpha_star, blacklist,
                         hc, ntests, score, tabu, whitelist)
 
@@ -65,7 +68,9 @@ __all__ = [
     "ci_test", "score", "alpha_star", "BF", "H", "KL",
     "whitelist", "blacklist", "ntests",
     # preprocessing
-    "discretize", "configs",
+    "discretize", "configs", "dedup",
+    # counters
+    "test_counter", "reset_test_counter", "increment_test_counter",
     # parameter learning and prediction
     "fit", "custom_fit", "bn_net", "predict", "identifiable", "singular",
     # incomplete data
@@ -76,8 +81,9 @@ __all__ = [
     "cpdist", "cpquery", "query", "rbn", "set_seed",
     "gbn2mvnorm", "mvnorm2gbn",
     # resampling and arc strength
-    "bn_cv", "boot_strength", "arc_strength", "custom_strength",
-    "averaged_network", "inclusion_threshold",
+    "bn_cv", "bn_boot", "loss", "boot_strength", "arc_strength",
+    "custom_strength", "bf_strength", "averaged_network",
+    "inclusion_threshold",
     # interchange formats
     "read_bif", "read_dsc", "read_net", "write_bif", "write_dsc",
     "write_net", "write_dot",
@@ -88,10 +94,11 @@ __all__ = [
     "acyclic", "connected_components", "directed", "node_ordering",
     "path_exists", "valid_cpdag", "valid_dag", "valid_ug",
     "dsep", "colliders", "unshielded_colliders", "shielded_colliders",
-    "vstructs", "cextend", "sid", "complete_graph", "random_graph",
+    "vstructs", "cextend", "cextend_all", "sid", "complete_graph",
+    "random_graph", "perturb", "count_graphs",
     "ordering2blacklist", "set2blacklist", "tiers2blacklist",
     # nodes and arcs
-    "arcs", "narcs", "nnodes", "parents", "children", "mb", "nbr", "spouses",
+    "arcs", "alst", "narcs", "nnodes", "parents", "children", "mb", "nbr", "spouses",
     "ancestors", "descendants", "root_nodes", "leaf_nodes", "isolated_nodes",
     "degree", "in_degree", "out_degree",
     "directed_arcs", "undirected_arcs", "incoming_arcs", "outgoing_arcs",

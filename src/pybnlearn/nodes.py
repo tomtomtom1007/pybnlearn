@@ -27,7 +27,7 @@ from .fit import FittedNetwork
 from .structure import BayesianNetwork
 
 __all__ = [
-    "add_node", "ancestors", "arcs", "children", "compelled_arcs",
+    "add_node", "alst", "ancestors", "arcs", "children", "compelled_arcs",
     "degree", "descendants", "directed_arcs", "drop_arc", "drop_edge",
     "in_degree", "incident_arcs", "incoming_arcs", "isolated_nodes", "mb",
     "narcs", "nbr", "nnodes", "out_degree", "outgoing_arcs", "parents",
@@ -67,6 +67,17 @@ def arcs(x):
 
 def nnodes(x):
     return len(_graph(x).nodes)
+
+
+def alst(x):
+    """The arcs as an adjacency list: each node mapped to its children.
+
+    R's arcs2alist() lists children rather than parents, which is the
+    direction the arcs point rather than the direction a conditional
+    probability table is indexed in.
+    """
+    network = _graph(x)
+    return {node: network.children(node) for node in network.nodes}
 
 
 def narcs(x):
