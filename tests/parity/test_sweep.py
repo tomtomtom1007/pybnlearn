@@ -660,33 +660,13 @@ def test_the_learning_metadata_matches_r(case, sweep_data):
     assert _arcs(pybnlearn.whitelist(learned) or []) == _arcs(case["whitelist"])
     assert _arcs(pybnlearn.blacklist(learned) or []) == _arcs(case["blacklist"])
 
-    if case["algorithm"] != "mmpc":
-        assert pybnlearn.ntests(learned) == int(case["ntests"])
-        return
-
-    # mmpc is the one algorithm whose *work* differs from R's, though its
-    # answer does not -- the constraint fixtures compare its arcs across six
-    # data sets and seven tests.  R's forward phase carries an `association`
-    # vector between iterations and only re-tests nodes still below alpha
-    # (maxmin.pc.heuristic.optimized); this port re-tests them all.  The
-    # maximum p-value over subsets is monotone as the conditioning set grows,
-    # so the extra tests cannot change the outcome, only the count.
-    #
-    # Pinned as an inequality plus a ceiling rather than left unchecked: the
-    # count must never drop below R's (that would mean tests were skipped,
-    # which could change an answer) and must not drift further upwards.
-    assert pybnlearn.ntests(learned) >= int(case["ntests"])
-    assert pybnlearn.ntests(learned) <= 2 * int(case["ntests"])
+    assert pybnlearn.ntests(learned) == int(case["ntests"])
 
 
-def test_only_mmpc_does_more_work_than_r():
-    """If another algorithm started re-testing, the parametrised test above
-    would catch it -- but this says out loud that mmpc is the only one, so
-    that widening the exemption is a deliberate act."""
-    exempt = {c["algorithm"] for c in _records("metadata")
-              if c["algorithm"] == "mmpc"}
-    assert exempt == {"mmpc"}
-
+def test_the_work_counter_covers_every_search():
+    """The comparison above is only worth as much as its coverage: every
+    search has to be in the fixtures, or one of them could quietly start
+    doing a different amount of work than R."""
     covered = {c["algorithm"] for c in _records("metadata")}
     assert len(covered) >= 11, "the work counter no longer covers every search"
 

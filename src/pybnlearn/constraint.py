@@ -344,7 +344,8 @@ def _mmpc_forward(tester, target, nodes, alpha, whitelist, blacklist, max_sx):
         if len(cpc) > max_sx:
             break
 
-        to_check = [n for n in association if n not in cpc]
+        to_check = [n for n in association
+                    if association[n] < alpha and n not in cpc]
         if not to_check:
             break
 

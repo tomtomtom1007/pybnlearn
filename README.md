@@ -234,14 +234,6 @@ boundary each observation fell. `test_hartemink_on_marks_really_is_decided_by_ti
 measures the sensitivity, so the exemption cannot quietly widen into covering
 a real disagreement.
 
-**`mmpc` does more work than R's for the same answer.** Its arcs agree
-everywhere they are compared, but `ntests()` is higher: R's forward phase
-carries an association vector between iterations and stops re-testing nodes
-already ruled out, and that memoisation is not ported. The maximum p-value
-over subsets is monotone in the conditioning set, so the extra tests cannot
-change the outcome. Every other algorithm's counter matches R exactly, which
-is what makes this visible at all.
-
 One inconsistency *is* reproduced rather than smoothed over, because
 smoothing it over would be the divergence: `bdj` accepts `prior` and `beta`
 and then ignores them, scoring as if the prior were uniform -- while still
