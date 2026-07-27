@@ -17,7 +17,7 @@ from ._core import (conditional_gaussian_parameters,
                     discrete_parameters, gaussian_parameters,
                     parent_configurations, predict_bayes_lw,
                     predict_parents)
-from .structure import _check_complete, _data_type, is_discrete_column
+from .structure import _data_type, is_discrete_column
 
 __all__ = ["ConditionalGaussianNode", "DiscreteNode", "FittedNetwork",
            "GaussianNode", "bn_net", "custom_fit", "fit", "identifiable",
@@ -186,11 +186,14 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data must be a pandas DataFrame")
 
-    _check_complete(data)
-
     nodes = [str(c) for c in data.columns]
     if set(nodes) != set(network.nodes):
         raise ValueError("the network and the data have different variables")
+
+    # Unlike the searches, parameter learning copes with gaps: the C code
+    # counts complete cases instead, but only when it is told to, so it has
+    # to be told per node rather than per data set.
+    complete = {node: not data[node].isna().any() for node in nodes}
 
     # bn.fit() needs a DAG: an undirected or partially directed graph does not
     # say which variable each node is conditioned on.
@@ -228,21 +231,26 @@ def fit(network, data, method=None, iss=1, keep_fitted=True,
 
     fitted = {}
     for node in network.nodes:
+        incomplete = not all(complete[n] for n in [node] + parents[node])
+
         if method == "mle-cg":
             fitted[node] = _fit_mixed(data, node, parents[node],
                                       children[node], _is_discrete,
-                                      keep_fitted, replace_unidentifiable)
+                                      keep_fitted, replace_unidentifiable,
+                                      incomplete)
         elif method in ("mle", "bayes"):
             table = discrete_parameters(
                 data, node, parents[node],
                 iss=(float(iss) if method == "bayes" else None),
-                replace_unidentifiable=replace_unidentifiable)
+                replace_unidentifiable=replace_unidentifiable,
+                missing=incomplete)
             fitted[node] = DiscreteNode(node, parents[node], children[node],
                                         table)
         else:
             result = gaussian_parameters(
                 data, node, parents[node], keep_fitted=keep_fitted,
-                replace_unidentifiable=replace_unidentifiable)
+                replace_unidentifiable=replace_unidentifiable,
+                missing=incomplete)
             fitted[node] = GaussianNode(node, parents[node], children[node],
                                         result)
 
@@ -255,7 +263,7 @@ def _as_factor(series):
 
 
 def _fit_mixed(data, node, parents, children, is_discrete, keep_fitted,
-               replace_unidentifiable):
+               replace_unidentifiable, incomplete=False):
     """bn.fit.backend.mixedcg(): pick the estimator the node's own type and
     its parents' types call for.
 
@@ -267,7 +275,8 @@ def _fit_mixed(data, node, parents, children, is_discrete, keep_fitted,
     if is_discrete(node):
         table = discrete_parameters(
             data, node, parents, iss=None,
-            replace_unidentifiable=replace_unidentifiable)
+            replace_unidentifiable=replace_unidentifiable,
+            missing=incomplete)
         return DiscreteNode(node, parents, children, table)
 
     discrete_parents = [p for p in parents if is_discrete(p)]
@@ -276,13 +285,14 @@ def _fit_mixed(data, node, parents, children, is_discrete, keep_fitted,
     if not discrete_parents:
         result = gaussian_parameters(
             data, node, parents, keep_fitted=keep_fitted,
-            replace_unidentifiable=replace_unidentifiable)
+            replace_unidentifiable=replace_unidentifiable,
+            missing=incomplete)
         return GaussianNode(node, parents, children, result)
 
     configs = parent_configurations(data[discrete_parents])
     result = conditional_gaussian_parameters(
         data, node, continuous_parents, configs, keep_fitted=keep_fitted,
-        replace_unidentifiable=replace_unidentifiable)
+        replace_unidentifiable=replace_unidentifiable, missing=incomplete)
 
     levels = {p: list(_as_factor(data[p]).cat.categories)
               for p in discrete_parents}

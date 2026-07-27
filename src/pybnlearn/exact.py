@@ -35,6 +35,7 @@ Licensed under the GNU General Public License version 3 or later.
 from __future__ import annotations
 
 import itertools
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -302,11 +303,25 @@ class _JunctionTree:
 
         bn.fit stores it with the node on the first axis and the parents after
         it, which is the order the variables are listed in here.
+
+        A parameter the data could not identify is NaN, and a network can
+        carry those around perfectly happily -- inference cannot.  R has the
+        same problem when it hands such a network to gRain, and answers it
+        the same way: substitute a uniform distribution and say so.
         """
         entry = self.fitted[node]
         variables = [node] + list(entry.parents)
         levels = {v: list(self.levels[v]) for v in variables}
-        return Factor(variables, levels, entry.probabilities)
+
+        values = entry.probabilities
+        if not np.isfinite(values).all():
+            warnings.warn(
+                f"NaN conditional probabilities in {node!r}, replaced with a "
+                "uniform distribution", stacklevel=3)
+            values = np.where(np.isfinite(values), values,
+                              1.0 / values.shape[0])
+
+        return Factor(variables, levels, values)
 
     def _assign(self):
         """Multiply each table into one clique that covers it."""

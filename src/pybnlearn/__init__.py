@@ -19,6 +19,7 @@ from .foreign import (read_bif, read_dsc, read_net, write_bif,
                       write_dot, write_dsc, write_net)
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
+from .missing import impute, structural_em
 from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
 from .graph import (acyclic, aracne, cextend, chow_liu, colliders, compare,
                     complete_graph, connected_components, cpdag, directed,
@@ -62,6 +63,8 @@ __all__ = [
     "discretize", "configs",
     # parameter learning and prediction
     "fit", "custom_fit", "bn_net", "predict", "identifiable", "singular",
+    # incomplete data
+    "impute", "structural_em",
     # simulation and inference
     "cpdist", "cpquery", "query", "rbn", "set_seed",
     "gbn2mvnorm", "mvnorm2gbn",

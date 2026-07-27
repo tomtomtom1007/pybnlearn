@@ -130,6 +130,7 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Editing a graph | `set_arc`, `drop_arc`, `reverse_arc`, `set_edge`, `drop_edge`, `add_node`, `remove_node`, `rename_nodes` |
 | Constraints from orderings | `ordering2blacklist`, `tiers2blacklist`, `set2blacklist` |
 | Parameter learning | `fit` — `mle` and `bayes` for discrete networks, `mle-g` for Gaussian ones, `mle-cg` for mixtures of the two; `custom_fit` to supply parameters by hand; `bn_net` to drop them again |
+| Incomplete data | `impute` — from a node's parents, by likelihood weighting, or exactly; `structural_em` to learn a structure despite the gaps, latent variables included |
 | Prediction | `predict` — from a node's parents, by likelihood weighting, or exactly |
 | Exact inference | `query` — junction tree for discrete networks, multivariate normal for Gaussian ones; conditional and joint distributions, computed rather than sampled |
 | Gaussian networks as distributions | `gbn2mvnorm`, `mvnorm2gbn` — the global mean and covariance, and the factorisation back |
@@ -140,11 +141,10 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Interchange formats | `read_bif`, `read_dsc`, `read_net`, `write_bif`, `write_dsc`, `write_net`, `write_dot` |
 | Utilities | `score`, `modelstring`, `identifiable`, `singular`, `whitelist`, `blacklist`, `ntests` |
 
-117 of bnlearn's 160 exported functions are covered.  Still to do:
-`direct.lingam`, incomplete data (`impute`, `structural.em`), the
-causal-inference layer (`as.scm`, `intervention`, `counterfactual`, `twin`),
-`perturb` and so random restarts for `hc`, `bn.boot`, `count.graphs`,
-`bf.strength`, and non-uniform graph priors.
+119 of bnlearn's 160 exported functions are covered.  Still to do:
+`direct.lingam`, the causal-inference layer (`as.scm`, `intervention`,
+`counterfactual`, `twin`), `perturb` and so random restarts for `hc`,
+`bn.boot`, `count.graphs`, `bf.strength`, and non-uniform graph priors.
 Exact inference covers discrete and Gaussian networks, but not mixtures of
 the two.
 
@@ -154,7 +154,7 @@ check against.
 
 ## Verified against R
 
-`pytest` runs 3244 checks, 3069 of which compare directly against values produced
+`pytest` runs 3295 checks, 3109 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -228,6 +228,10 @@ by R 4.6.1 with bnlearn 5.2.1:
 * 245 checks of fast.iamb, local structure learning, entropy and
   Kullback-Leibler divergence, the last two comparing pybnlearn's junction
   tree against gRain's;
+* 40 incomplete-data results: parameters estimated from data with gaps, all
+  three imputation methods, and structural EM under both maximisers -- plus
+  a latent variable, never observed at all, which is the case EM cannot
+  start from an empty network on;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -258,6 +262,7 @@ Rscript tools/gen_r_foreign_fixtures.R
 Rscript tools/gen_r_analysis_fixtures.R
 Rscript tools/gen_r_local_fixtures.R     # also needs gRain
 Rscript tools/gen_r_hpc_fixtures.R
+Rscript tools/gen_r_missing_fixtures.R   # also needs gRain
 ```
 
 ## Performance

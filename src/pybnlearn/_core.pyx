@@ -1517,10 +1517,16 @@ cdef object _read_table(SEXP x):
 
 
 def discrete_parameters(data, node, parents, iss=None,
-                        bint replace_unidentifiable=False):
+                        bint replace_unidentifiable=False,
+                        bint missing=False):
     """classic_discrete_parameters(): the conditional probability table of one
     node.  `iss` present selects the Bayesian estimator, absent the maximum
-    likelihood one."""
+    likelihood one.
+
+    `missing` tells the C code that this node or one of its parents has gaps,
+    so that it counts complete cases rather than using a missing value as a
+    table index.
+    """
     cdef SEXP a[6]
 
     _ensure_init()
@@ -1531,7 +1537,7 @@ def discrete_parameters(data, node, parents, iss=None,
         a[2] = _str_vector([str(p) for p in (parents or [])])
         a[3] = R_NilValue if iss is None else Rf_ScalarReal(float(iss))
         a[4] = Rf_ScalarLogical(1 if replace_unidentifiable else 0)
-        a[5] = Rf_ScalarLogical(0)
+        a[5] = Rf_ScalarLogical(1 if missing else 0)
         return _read_table(
             _guarded(<void *>classic_discrete_parameters, a, 6))
     finally:
@@ -1539,7 +1545,8 @@ def discrete_parameters(data, node, parents, iss=None,
 
 
 def gaussian_parameters(data, node, parents, bint keep_fitted=True,
-                        bint replace_unidentifiable=False):
+                        bint replace_unidentifiable=False,
+                        bint missing=False):
     """gaussian_ols_parameters(): the regression of one node on its parents."""
     cdef SEXP a[6]
     cdef SEXP out
@@ -1552,7 +1559,7 @@ def gaussian_parameters(data, node, parents, bint keep_fitted=True,
         a[2] = _str_vector([str(p) for p in (parents or [])])
         a[3] = Rf_ScalarLogical(1 if keep_fitted else 0)
         a[4] = Rf_ScalarLogical(1 if replace_unidentifiable else 0)
-        a[5] = Rf_ScalarLogical(0)
+        a[5] = Rf_ScalarLogical(1 if missing else 0)
         out = _guarded(<void *>gaussian_ols_parameters, a, 6)
         return _sexp_to_py(out)
     finally:
@@ -2112,7 +2119,8 @@ def parent_configurations(data):
 
 def conditional_gaussian_parameters(data, node, continuous_parents, configs,
                                     bint keep_fitted=True,
-                                    bint replace_unidentifiable=False):
+                                    bint replace_unidentifiable=False,
+                                    bint missing=False):
     """mixture_gaussian_ols_parameters(): one regression per configuration of
     the discrete parents."""
     cdef SEXP a[7]
@@ -2129,7 +2137,7 @@ def conditional_gaussian_parameters(data, node, continuous_parents, configs,
                               list(configs.categories))
         a[4] = Rf_ScalarLogical(1 if keep_fitted else 0)
         a[5] = Rf_ScalarLogical(1 if replace_unidentifiable else 0)
-        a[6] = Rf_ScalarLogical(0)
+        a[6] = Rf_ScalarLogical(1 if missing else 0)
         out = _guarded(<void *>mixture_gaussian_ols_parameters, a, 7)
 
         names = _names_of(out) or []

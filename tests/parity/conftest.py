@@ -36,6 +36,14 @@ MIXED = {"clgaussian.test", "cgsmall"}
 # algorithm changes behaviour when the contingency tables get thin
 SPARSE = {"sparse"}
 
+# data sets that are *meant* to have gaps in them.  Everywhere else an empty
+# field is a category label and reading it as missing is the bug this file
+# guards against; here it is the point, so these are read the other way
+# round -- and a latent variable is a column of nothing but gaps.
+INCOMPLETE = {"incomplete.discrete": "discrete",
+              "incomplete.continuous": "continuous",
+              "latent": "discrete"}
+
 
 def _levels():
     path = FIXTURES / "levels.json"
@@ -49,6 +57,21 @@ def datasets():
 
     for path in sorted(FIXTURES.glob("*.csv")):
         name = path.stem
+
+        if name in INCOMPLETE:
+            frame = pd.read_csv(path)
+            if INCOMPLETE[name] == "discrete":
+                for column in frame.columns:
+                    frame[column] = frame[column].astype("category")
+            else:
+                frame = frame.astype("float64")
+
+            for column, order in levels.get(name, {}).items():
+                if column in frame.columns:
+                    frame[column] = frame[column].cat.set_categories(order)
+
+            loaded[name] = frame
+            continue
 
         if name in CONTINUOUS:
             loaded[name] = pd.read_csv(path, dtype="float64")
@@ -68,5 +91,18 @@ def datasets():
                 frame[column] = frame[column].cat.reorder_categories(order)
 
         loaded[name] = frame
+
+    # A latent variable is a column of nothing but gaps, so reading it back
+    # gives a categorical with no categories at all.  R keeps the levels
+    # because its copy never went through a CSV; here they have to be put
+    # back, and `latent` is learning.test with one column blanked, so that
+    # is where they come from.  Done after the loop because the files are
+    # read in alphabetical order.
+    if "latent" in loaded and "learning.test" in loaded:
+        for column in loaded["latent"].columns:
+            if not len(loaded["latent"][column].cat.categories):
+                loaded["latent"][column] = (
+                    loaded["latent"][column].cat.set_categories(
+                        loaded["learning.test"][column].cat.categories))
 
     return loaded
