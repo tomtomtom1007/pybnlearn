@@ -284,7 +284,22 @@ def test_discretize_matches_r(case, datasets):
         assert list(got[name].astype(str)[:30]) == case["head"][name], name
 
 
-def _tie_sensitive(data, case, extra):
+def _nudged_results(data, case, extra, trials):
+    """The discretization after moving one observation by one unit in the
+    last place, for each of `trials` different observations.
+
+    One per column is not enough: on `marks` the flips are at rows 6, 8, 9
+    and 11, and a sweep that stopped at the fifth row found none of them and
+    concluded the result was stable.  It is not.
+    """
+    for i in range(trials):
+        column = data.columns[i % data.shape[1]]
+        nudged = data.copy()
+        nudged.loc[i, column] = np.nextafter(nudged.loc[i, column], np.inf)
+        yield _discretized(nudged, case, extra)
+
+
+def _tie_sensitive(data, case, extra, trials=12):
     """Whether a one-ulp change anywhere in the data moves this
     discretization.  Measured rather than assumed, because the answer
     depends on the data and the number of initial bins, not on the method
@@ -293,14 +308,10 @@ def _tie_sensitive(data, case, extra):
         return False
 
     reference = _discretized(data, case, extra)
+    trials = min(trials, len(data))
 
-    for i, column in enumerate(data.columns):
-        nudged = data.copy()
-        nudged.loc[i, column] = np.nextafter(nudged.loc[i, column], np.inf)
-        if _discretized(nudged, case, extra) != reference:
-            return True
-
-    return False
+    return any(result != reference
+               for result in _nudged_results(data, case, extra, trials))
 
 
 def _discretized(frame, case, extra):
@@ -326,14 +337,8 @@ def test_hartemink_on_marks_really_is_decided_by_ties():
     extra = {"idisc": "quantile", "ibreaks": 30}
 
     reference = _discretized(data, case, extra)
-    moved = 0
-
-    for i in range(12):
-        nudged = data.copy()
-        column = data.columns[i % data.shape[1]]
-        nudged.loc[i, column] = np.nextafter(nudged.loc[i, column], np.inf)
-        if _discretized(nudged, case, extra) != reference:
-            moved += 1
+    moved = sum(result != reference
+                for result in _nudged_results(data, case, extra, 12))
 
     assert moved > 0, (
         "a one-ulp change no longer moves this discretization; if that is "

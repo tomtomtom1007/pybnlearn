@@ -5,9 +5,10 @@ for Bayesian network structure learning, parameter learning and inference.
 
 > **Status: pre-release.** 139 of bnlearn's 160 exported functions are ported
 > and checked against R — see [What works](#what-works) and
-> [Verified against R](#verified-against-r). What is *not* proven is the
-> packaging: only the macOS arm64 wheel has ever been built, so the Linux and
-> Windows builds are unexercised. Expect the first releases to be alphas.
+> [Verified against R](#verified-against-r). macOS wheels build in CI and pass
+> the full suite; Linux wheels build on x86-64 and aarch64 and pass it too.
+> Windows is the one platform still being brought up. Expect the first
+> releases to be alphas.
 
 ## What makes this a port rather than a reimplementation
 
@@ -31,7 +32,11 @@ R's own standalone maths library is vendored too (`src/c/nmath/`), along with
 R's Mersenne-Twister, so distribution functions and random streams agree with R
 bit for bit. That is what makes it meaningful to assert that results *match*
 rather than *approximate*: the parity suite compares against numbers generated
-by R itself, at a relative tolerance of 1e-12.
+by R itself, at a relative tolerance of 1e-11 — a bound set by measuring the
+worst disagreement across macOS and Linux (1.05e-12), not chosen for comfort.
+On one machine the agreement is 1e-12, which is what the fixtures were
+generated to. Where it cannot be that good, and why, is set out under
+[what "matches R" does not cover](#what-works).
 
 Because bnlearn is GPL-2 | GPL-3, pybnlearn is distributed under the GPL v3 or
 later. See `NOTICE` for attribution.
@@ -181,21 +186,42 @@ total with the corrected value.
 Exact inference covers discrete and Gaussian networks, but not mixtures of
 the two.
 
-Two limits on how far "matches R" goes, both found by the sweep below rather
-than reasoned about in advance.
+Three limits on how far "matches R" goes, all found by running the code
+somewhere new rather than reasoned about in advance.
 
-**Linear algebra is not bit-identical, and cannot be.** The vendored nmath and
-Mersenne-Twister make distributions and random streams agree with R exactly,
-but BLAS and LAPACK are the platform's, not R's — Accelerate on macOS,
-OpenBLAS on the Linux and Windows wheels, against whatever R itself was built
-with. Same C, same input bits, different summation order. On well-conditioned
-data this is invisible at 1e-12; on badly conditioned data it is not. For a
+**The last digit belongs to the platform, not to this package.** The vendored
+nmath and Mersenne-Twister make distributions and random streams agree with R
+exactly, but nmath itself calls `log`, `exp` and `lgamma` from the system
+maths library, and glibc and Apple's libm differ in the last unit in the last
+place. Nothing vendored can fix that. Measured across macOS and Linux the
+worst relative disagreement over the whole suite is **1.05e-12**, so the
+parity tests compare at a relative tolerance of 1e-11 — ten-fold headroom over
+what was observed, tight enough that a real regression still fails. On a
+single machine agreement is far better, at the 1e-12 the fixtures were
+generated to.
+
+BLAS is the suspect people reach for here, and it is the wrong one: building
+against scipy-openblas32 instead of Accelerate — a genuinely different BLAS on
+the same machine — changes nothing at all, and the whole suite passes
+unaltered.
+
+**Ill-conditioned data determine fewer digits than they appear to.** For a
 data set built with two columns correlated to 1 − 5e-13, a partial correlation
 agrees with R only to about four digits — and measured against exact rational
 arithmetic, *neither* answer is better: R is wrong by 6.6e-5, this by 2.9e-4,
 against a forward error bound of 1.5e-3. The data do not determine those
 digits. `test_the_ill_conditioned_disagreement_is_not_a_defect` does that
-arithmetic rather than asserting it. Expect the same across platforms.
+arithmetic rather than asserting it.
+
+**Some results are decided by ties, and those cannot be compared at all.**
+Hartemink's discretization merges 30 initial bins over 88 observations on the
+`marks` data, so it chooses between differences that small — and a one-ulp
+change to a single observation, which is the same data by any reasonable
+reading, moves the answer in 4 of 12 trials. There the tests compare the
+levels and their number, which are reproducible, and not which side of a
+boundary each observation fell. `test_hartemink_on_marks_really_is_decided_by_ties`
+measures the sensitivity, so the exemption cannot quietly widen into covering
+a real disagreement.
 
 **`mmpc` does more work than R's for the same answer.** Its arcs agree
 everywhere they are compared, but `ntests()` is higher: R's forward phase
@@ -214,7 +240,7 @@ the fixtures pin down both halves of it.
 
 ## Verified against R
 
-`pytest` runs 8852 checks, 8443 of which compare directly against values produced
+`pytest` runs 8853 checks, 8443 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
