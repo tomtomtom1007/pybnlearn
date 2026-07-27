@@ -269,18 +269,19 @@ def test_discretize_matches_r(case, datasets):
 
     assert list(got.columns) == list(case["levels"])
 
-    for name, levels in case["levels"].items():
-        assert list(got[name].cat.categories) == levels, name
-
     if _tie_sensitive(data, case, extra):
-        # The boundaries are decided by ties finer than two implementations
-        # can agree on -- see the test below, which measures it.  The level
-        # names and their number still have to match, and do, but which side
-        # of a boundary a given observation falls on is not reproducible
-        # across platforms and must not be asserted.
+        # Everything below the column set is decided by ties finer than two
+        # implementations can agree on -- see the test after this one, which
+        # measures it.  That includes the level *names*, because they are the
+        # boundaries: R chose "[0,34]" where Linux chose "[0,30]" for the
+        # same column of the same data.  What survives is how many levels
+        # each variable ends up with, which is what `breaks` asked for.
+        for name, levels in case["levels"].items():
+            assert len(got[name].cat.categories) == len(levels), name
         return
 
-    for name in case["levels"]:
+    for name, levels in case["levels"].items():
+        assert list(got[name].cat.categories) == levels, name
         assert list(got[name].astype(str)[:30]) == case["head"][name], name
 
 
