@@ -1,5 +1,10 @@
 # pybnlearn
 
+[![PyPI](https://img.shields.io/pypi/v/bnlearn-port.svg)](https://pypi.org/project/bnlearn-port/)
+[![Python versions](https://img.shields.io/pypi/pyversions/bnlearn-port.svg)](https://pypi.org/project/bnlearn-port/)
+[![Licence](https://img.shields.io/pypi/l/bnlearn-port.svg)](LICENSE)
+[![wheels](https://github.com/tomtomtom1007/pybnlearn/actions/workflows/wheels.yml/badge.svg)](https://github.com/tomtomtom1007/pybnlearn/actions/workflows/wheels.yml)
+
 A Python port of [bnlearn](https://www.bnlearn.com/), Marco Scutari's R package
 for Bayesian network structure learning, parameter learning and inference.
 
@@ -8,7 +13,9 @@ for Bayesian network structure learning, parameter learning and inference.
 > [Verified against R](#verified-against-r). Wheels build in CI for Linux
 > (x86-64 and aarch64, manylinux and musllinux), macOS arm64 and Windows, and
 > each one runs the whole parity suite before it is kept. Nobody outside this
-> repository has used it yet, so expect the first releases to be alphas.
+> repository has used it yet, which is why the releases so far are alphas —
+> and, since there is no stable release for pip to prefer, `pip install
+> bnlearn-port` currently gives you one.
 >
 > **This is a port, not a drop-in replacement.** Plotting (`graphviz.*`,
 > `strength.plot`, the `bn.fit.*` lattice plots) and the conversions to

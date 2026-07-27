@@ -24,9 +24,13 @@
 3. ~~Decide the version.~~ Done: `0.1.0a1`, in `pyproject.toml` and
    `src/pybnlearn/__init__.py`.  An alpha not because much is missing -- 139
    of bnlearn's 160 exports are ported and checked -- but because nobody
-   outside this repository has run it, and PyPI treats a pre-release as
-   opt-in, so `pip install bnlearn-port` will not pick it up unless somebody
-   asks for it.
+   outside this repository has run it.
+
+   **A pre-release is only opt-in once a stable release exists.**  pip
+   prefers stable versions, but falls back to pre-releases when a project
+   has nothing else, so `pip install bnlearn-port` installs the alpha today
+   -- verified, not assumed.  Cutting `0.1.0` is what makes `--pre` start
+   meaning something.
 
    **The distribution is `bnlearn-port`; the import is still `pybnlearn`.**
    PyPI refuses names too close to an existing project and there is already a
