@@ -123,7 +123,7 @@ tests — before being kept. Thirty wheels, thirty suite runs.
 | `twine check` | passes for both artefacts |
 | C translation of dqrdc2/dqrsl | agrees with the Fortran bit for bit over 60 cases including rank-deficient ones (`tools/check_linpack.sh`) |
 | **macOS x86-64** | **not built, and not buildable here** — see below |
-| Trusted Publishing | configuration written, never run |
+| Trusted Publishing | **exercised on TestPyPI**: 31 files uploaded by the OIDC exchange, installed from there into a clean virtualenv, and `hc` reproduced R's model string |
 
 **macOS x86-64.** `macos-13` was the last Intel image GitHub hosted and it no
 longer schedules: the job sat for fifty-eight minutes with no runner assigned
@@ -133,10 +133,13 @@ universal framework — but the tests cannot run on the wrong architecture, and
 an untested wheel is not what this project ships. Intel Macs build from the
 sdist, which is exercised above.
 
-**Trusted Publishing is the one path still unexercised.** It only runs on a
-`v*` tag, so nothing so far has touched it. Try TestPyPI first (below): a
-version number on PyPI can never be reused, and a misconfigured publisher
-fails after the wheels are built rather than before.
+**Trusted Publishing has been rehearsed.** The `publish-testpypi` job ran the
+same OIDC exchange against TestPyPI and uploaded all 31 artefacts -- one
+sdist, five macOS arm64, ten manylinux, ten musllinux, five Windows --
+which then installed from TestPyPI into a clean virtualenv and reproduced
+R's answer on learning.test. What remains untested is only that the *PyPI*
+registration is correct, which differs from the TestPyPI one by a single
+field (`pypi` rather than `testpypi` as the environment).
 
 ## Known packaging limitations
 
