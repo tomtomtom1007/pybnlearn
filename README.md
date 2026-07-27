@@ -243,7 +243,7 @@ the fixtures pin down both halves of it.
 
 ## Verified against R
 
-`pytest` runs 8853 checks, 8443 of which compare directly against values produced
+`pytest` runs 9363 checks, 8699 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -398,6 +398,7 @@ Rscript tools/gen_r_misc_fixtures.R      # also needs gmp and Rmpfr
 Rscript tools/gen_r_priors_fixtures.R
 Rscript tools/gen_r_amat_fixtures.R
 Rscript tools/gen_r_sweep_fixtures.R
+Rscript tools/gen_r_rejection_fixtures.R
 ```
 
 ## Performance
