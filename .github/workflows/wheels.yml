@@ -80,6 +80,34 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
+  # A rehearsal for the job below, on the one path that a tag cannot be used
+  # to test twice: Trusted Publishing either authenticates or it does not, and
+  # a version number spent finding that out cannot be spent again.  Run it
+  # from the Actions tab (Run workflow) whenever the release machinery
+  # changes.
+  #
+  # skip-existing so that repeating a rehearsal is free -- TestPyPI refuses a
+  # version it already has, and there is nothing to learn from that refusal.
+  publish-testpypi:
+    name: rehearse on TestPyPI
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    environment: testpypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
   publish:
     name: publish to PyPI
     needs: [build-wheels, build-sdist]

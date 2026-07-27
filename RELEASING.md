@@ -54,18 +54,41 @@ uploads everything to PyPI. A full matrix is thirty wheels and takes about
 fifty minutes; Linux is the long pole, since it builds twice as many as the
 others.
 
-## Trying it against TestPyPI first
+## Rehearsing on TestPyPI
 
-Worth doing for the first release, because a version number on PyPI can never
-be reused. Add a step before the real publish:
+Worth doing before the first release, and after any change to the release
+machinery, because Trusted Publishing is the one step a tag cannot test
+twice: it either authenticates or it does not, and the version number spent
+finding out cannot be spent again.
 
-```yaml
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-```
+The `publish-testpypi` job exists for this and runs on **workflow_dispatch**
+only -- nothing to edit and nothing to revert, so the rehearsal exercises the
+same workflow the release will.
 
-then install from there in a clean environment:
+Once, first:
+
+1. Create a TestPyPI account at <https://test.pypi.org/account/register/> --
+   it is a separate site from PyPI and shares no accounts.
+2. Add a pending publisher at
+   <https://test.pypi.org/manage/account/publishing/> with the same fields as
+   PyPI except the environment:
+
+   | field | value |
+   |---|---|
+   | PyPI project name | `bnlearn-port` |
+   | Owner | `tomtomtom1007` |
+   | Repository name | `pybnlearn` |
+   | Workflow name | `wheels.yml` |
+   | Environment name | `testpypi` |
+
+3. Create a `testpypi` environment under the repository's
+   Settings -> Environments, alongside `pypi`.
+
+Then, any time: the repository's Actions tab -> `wheels` -> **Run workflow**.
+It builds the full matrix and uploads to TestPyPI. `skip-existing` is set, so
+repeating a rehearsal on the same version is free.
+
+To check what arrived, install it in a clean environment:
 
 ```bash
 pip install --index-url https://test.pypi.org/simple/ \
