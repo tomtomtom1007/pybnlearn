@@ -119,6 +119,8 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Structure learning (local) | `learn_mb`, `learn_nbr` — one node's Markov blanket or neighbourhood, without the whole network |
 | Structure learning (hybrid) | `mmhc`, `h2pc`, `rsmax2` — any ported restrict/maximize pair |
 | Structure learning (pairwise) | `chow_liu`, `aracne` |
+| Causal discovery | `lingam_ordering` — the causal ordering non-Gaussianity identifies; `direct_lingam` |
+| Causal inference | `as_scm`, `intervention` (`mutilated`), `twin`, `counterfactual` |
 | Graphs | `cpdag`, `moral`, `skeleton`, `pdag2dag`, `subgraph`, `empty_graph`, `model2network`, topological ordering |
 | Comparison | `shd`, `hamming`, `compare`, `nparams`, `sid` |
 | Information | `H` (entropy), `KL` (divergence), `BF` (Bayes factor), `alpha_star` |
@@ -141,10 +143,18 @@ data["Species"] = data["Species"].cat.reorder_categories(["Sagrei", "Distichus"]
 | Interchange formats | `read_bif`, `read_dsc`, `read_net`, `write_bif`, `write_dsc`, `write_net`, `write_dot` |
 | Utilities | `score`, `modelstring`, `identifiable`, `singular`, `whitelist`, `blacklist`, `ntests` |
 
-119 of bnlearn's 160 exported functions are covered.  Still to do:
-`direct.lingam`, the causal-inference layer (`as.scm`, `intervention`,
-`counterfactual`, `twin`), `perturb` and so random restarts for `hc`,
-`bn.boot`, `count.graphs`, `bf.strength`, and non-uniform graph priors.
+126 of bnlearn's 160 exported functions are covered.  Still to do:
+`perturb` and so random restarts for `hc`, `bn.boot`, `loss`,
+`count.graphs`, `cextend.all`, `bf.strength`, `dedup`, and non-uniform graph
+priors.
+
+Two things are deliberately not reproduced, and both are documented where
+they live.  `direct_lingam` gives R's causal *ordering* exactly, but picks
+the arcs with a score-based search rather than with glmnet's adaptive lasso,
+which is not vendored.  And `mi = "gkernel"` raises rather than returning a
+number: bnlearn builds its Gram matrix with a matrix product where it means
+an elementwise one, leaving a condition number around 1e20, so R's own
+answer is floating-point noise and cannot be reproduced by anything.
 Exact inference covers discrete and Gaussian networks, but not mixtures of
 the two.
 
@@ -154,7 +164,7 @@ check against.
 
 ## Verified against R
 
-`pytest` runs 3295 checks, 3109 of which compare directly against values produced
+`pytest` runs 3398 checks, 3310 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -232,6 +242,12 @@ by R 4.6.1 with bnlearn 5.2.1:
   three imputation methods, and structural EM under both maximisers -- plus
   a latent variable, never observed at all, which is the case EM cannot
   start from an empty network on;
+* 183 causal results: interventions on every node of four graph shapes,
+  twin networks, and counterfactuals with and without node merging -- plus
+  the parameterised half, where a node's residual variance becomes a node of
+  its own feeding both copies;
+* 18 LiNGAM causal orderings, including a data set with genuinely
+  non-Gaussian noise, which is the assumption the method rests on;
 * 27 checks of the graph utilities: CPDAG, moral graph and skeleton for six
   learned networks, `shd`/`hamming`/`compare` over five network pairs,
   `model2network` round trips, and `chow_liu` and `aracne` on six data sets;
@@ -263,6 +279,8 @@ Rscript tools/gen_r_analysis_fixtures.R
 Rscript tools/gen_r_local_fixtures.R     # also needs gRain
 Rscript tools/gen_r_hpc_fixtures.R
 Rscript tools/gen_r_missing_fixtures.R   # also needs gRain
+Rscript tools/gen_r_causal_fixtures.R
+Rscript tools/gen_r_lingam_fixtures.R
 ```
 
 ## Performance

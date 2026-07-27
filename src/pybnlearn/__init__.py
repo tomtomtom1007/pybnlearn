@@ -21,6 +21,7 @@ from .foreign import (read_bif, read_dsc, read_net, write_bif,
                       write_dot, write_dsc, write_net)
 from .hybrid import h2pc, mmhc, rsmax2
 from .inference import cpdist, cpquery, rbn, set_seed
+from .lingam import direct_lingam, lingam_ordering
 from .missing import impute, structural_em
 from .mvnorm import MultivariateNormal, gbn2mvnorm, mvnorm2gbn
 from .graph import (acyclic, aracne, cextend, chow_liu, colliders, compare,
@@ -56,6 +57,7 @@ __all__ = [
     "gs", "iamb", "iamb_fdr", "inter_iamb", "fast_iamb", "mmpc", "pc_stable",
     "si_hiton_pc", "hpc", "learn_mb", "learn_nbr",
     "h2pc", "mmhc", "rsmax2",
+    "direct_lingam", "lingam_ordering",
     "aracne", "chow_liu",
     # classifiers
     "classify", "naive_bayes", "tree_bayes",
