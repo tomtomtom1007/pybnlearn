@@ -211,3 +211,101 @@ def test_everything_exported_exists():
     missing = [name for name in pybnlearn.__all__
                if not hasattr(pybnlearn, name)]
     assert not missing, "in __all__ but not importable: " + ", ".join(missing)
+
+
+# ---------------------------------------------------------------------------
+# input R rejects and this used to accept
+#
+# Each of these was found by feeding malformed input to the whole public API
+# and comparing what came back with R.  They share a failure mode: the answer
+# was not an error but a plausible-looking network, which is the only kind of
+# bug a parity suite built from valid inputs cannot see.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def continuous():
+    rng = np.random.default_rng(0)
+    a = rng.normal(size=200)
+    return pd.DataFrame({"A": a, "B": a * 2 + rng.normal(size=200),
+                         "C": rng.normal(size=200)})
+
+
+def test_non_finite_data_is_rejected(continuous):
+    """An infinity is not missing, so the completeness check let it through.
+    It then reaches the Gaussian scores as a number: every score comes out
+    NaN, no comparison between two NaNs is true, the search accepts no move,
+    and the empty network that comes back looks like a finding.  R refuses
+    the data, and this used to return that empty network.
+    """
+    for value in (np.inf, -np.inf):
+        spoiled = continuous.copy()
+        spoiled.loc[0, "A"] = value
+
+        with pytest.raises(ValueError, match="non-finite"):
+            pybnlearn.hc(spoiled)
+
+
+def test_non_finite_data_is_rejected_everywhere_not_just_in_hc(continuous):
+    spoiled = continuous.copy()
+    spoiled.loc[0, "B"] = np.inf
+
+    for call in (lambda: pybnlearn.hc(spoiled),
+                 lambda: pybnlearn.tabu(spoiled),
+                 lambda: pybnlearn.pc_stable(spoiled),
+                 lambda: pybnlearn.gs(spoiled),
+                 lambda: pybnlearn.boot_strength(spoiled, algorithm="hc",
+                                                 replicates=2)):
+        with pytest.raises(ValueError, match="non-finite"):
+            call()
+
+
+def test_a_finite_extreme_is_still_data(continuous):
+    """The check is for infinity, not for magnitude: a large number is
+    unusual, not invalid, and rejecting it would be a new restriction rather
+    than a reproduction of R's."""
+    extreme = continuous.copy()
+    extreme.loc[0, "A"] = 1e300
+
+    assert pybnlearn.hc(extreme).nodes == ["A", "B", "C"]
+
+
+def test_maxp_must_leave_room_for_a_parent(discrete):
+    """Zero parents is not a degenerate case that happens to give the empty
+    network -- it is a request that cannot be met.  This used to return the
+    empty network for it, and for a negative limit."""
+    for limit in (0, -1, -100):
+        for search in (pybnlearn.hc, pybnlearn.tabu):
+            with pytest.raises(ValueError, match="positive integer"):
+                search(discrete, maxp=limit)
+
+
+def test_maxp_still_accepts_a_real_limit(discrete):
+    assert pybnlearn.hc(discrete, maxp=1).narcs <= 2
+    assert pybnlearn.hc(discrete, maxp=float("inf")).nodes == ["A", "B", "C"]
+
+
+def test_a_model_string_cannot_describe_an_undirected_arc():
+    """"[A|B][B|A]" makes A a parent of B and B a parent of A, which is how an
+    undirected arc is stored -- so the string describes a graph no model
+    string can describe, and it does not round trip.  R refuses it; this used
+    to return the two-arc graph."""
+    with pytest.raises(ValueError, match="partially directed"):
+        pybnlearn.model2network("[A|B][B|A]")
+
+
+def test_a_model_string_cannot_describe_a_cycle():
+    """A model string is a factorisation, and a factorisation has to be
+    acyclic to mean anything."""
+    with pytest.raises(ValueError, match="cycle"):
+        pybnlearn.model2network("[A|C][B|A][C|B]")
+
+
+def test_valid_model_strings_still_parse():
+    """The two checks above must not have narrowed what a model string can
+    say: a collider is two arcs into one node and is not a cycle, and a
+    diamond has two paths between the same pair and is not one either."""
+    for modelstring in ("[A][B][C|A:B]",
+                        "[A][B|A][C|A][D|B:C]",
+                        "[A][C][F][B|A][D|A:C][E|B:F]",
+                        "[A]"):
+        assert pybnlearn.model2network(modelstring).modelstring() == modelstring

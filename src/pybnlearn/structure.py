@@ -166,12 +166,19 @@ def _data_type(data):
 
 
 def _check_complete(data):
-    """Reject data with missing values.
+    """Reject data with missing or infinite values.
 
     None of the scores wired up so far can handle incomplete data, and the C
     code does not check: a missing value reaches the discrete scores as R's
     NA_INTEGER, which is INT_MIN, and is used unguarded as a contingency-table
     index.  That is an out-of-bounds write, so this has to be caught here.
+
+    An infinity is quieter and worse.  It is not missing, so nothing rejects
+    it, and it reaches the Gaussian scores as a number: the mean and variance
+    come out non-finite, every score comes out NaN, no comparison between two
+    NaNs is ever true, and the search accepts no move at all.  The answer is
+    an empty network that looks like a finding.  R refuses the data instead,
+    and so does this.
     """
     incomplete = [str(c) for c in data.columns if data[c].isna().any()]
     if incomplete:
@@ -183,6 +190,32 @@ def _check_complete(data):
               "that pandas.read_csv() treats strings such as 'NA', 'None' and "
               "'N/A' as missing by default -- pass keep_default_na=False if "
               "they are meant to be category labels.")
+
+    unbounded = [str(c) for c in data.columns
+                 if pd.api.types.is_numeric_dtype(data[c])
+                 and not np.isfinite(data[c].to_numpy()).all()]
+    if unbounded:
+        raise ValueError(
+            "the data contain non-finite values in "
+            + ", ".join(unbounded[:5])
+            + (", ..." if len(unbounded) > 5 else ""))
+
+
+def _check_maxp(maxp):
+    """check.maxp(): the parent limit has to leave room for a parent.
+
+    Zero or a negative number is not a degenerate case that happens to give
+    the empty network -- it is a request that cannot be met, and returning
+    the empty network for it would look like a result.
+    """
+    if maxp is None or maxp == float("inf"):
+        return float("inf")
+    if isinstance(maxp, float) and not maxp.is_integer():
+        raise ValueError("maxp must be a positive integer number")
+    maxp = int(maxp)
+    if maxp < 1:
+        raise ValueError("maxp must be a positive integer number")
+    return maxp
 
 
 def build_blacklist(blacklist, whitelist):
@@ -515,6 +548,7 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
         raise ValueError("perturb must be a positive integer")
 
     _check_complete(data)
+    maxp = _check_maxp(maxp)
 
     nodes = [str(c) for c in data.columns]
     n = len(nodes)
@@ -747,6 +781,7 @@ def tabu(data, start=None, whitelist=None, blacklist=None, score=None,
         raise ValueError("the tabu list must have at least one slot")
 
     _check_complete(data)
+    maxp = _check_maxp(maxp)
 
     tabu = int(tabu)
     nodes = [str(c) for c in data.columns]

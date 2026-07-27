@@ -190,6 +190,18 @@ def model2network(modelstring):
     if len(set(nodes)) != len(nodes):
         raise ValueError(f"model string declares a node twice: {modelstring!r}")
 
+    # "[A|B][B|A]" declares A a parent of B and B a parent of A, which is how
+    # an *undirected* arc is held -- so the string describes a graph a model
+    # string cannot describe, and R refuses it rather than returning
+    # something that will not round trip.  A longer cycle is refused for the
+    # same reason: a model string is a factorisation, and a factorisation has
+    # to be acyclic to mean anything.
+    if len(set(arcs)) != len(arcs) or len({frozenset(a) for a in arcs}) != len(arcs):
+        raise ValueError(
+            f"the graph is only partially directed: {modelstring!r}")
+    if not _acyclic(sorted(nodes), arcs, directed=True):
+        raise ValueError(f"the graph contains cycles: {modelstring!r}")
+
     # R sorts the nodes rather than keeping the order they were declared in,
     # and the node order decides how modelstring() lists each node's parents,
     # so the round trip only reproduces R's output if this sorts too.  The
