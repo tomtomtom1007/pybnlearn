@@ -8,6 +8,8 @@ merely resembling them.  See NOTICE for attribution and licensing.
 from ._core import BNLearnError, ci_test
 from .bootstrap import CrossValidation, bn_cv, boot_strength
 from .classifiers import classify, naive_bayes, tree_bayes
+from .causal import (StructuralCausalModel, as_bn, as_scm,
+                     counterfactual, intervention, mutilated, twin)
 from .constraint import (fast_iamb, gs, hpc, iamb, iamb_fdr, inter_iamb,
                          learn_mb, learn_nbr, mmpc, pc_stable, si_hiton_pc)
 from .divergence import H, KL
@@ -48,6 +50,7 @@ __all__ = [
     "BNLearnError", "BayesianNetwork", "ConditionalGaussianNode",
     "CrossValidation", "DiscreteNode",
     "Factor", "FittedNetwork", "GaussianNode", "MultivariateNormal",
+    "StructuralCausalModel",
     # structure learning: score-based, constraint-based, hybrid, pairwise
     "hc", "tabu",
     "gs", "iamb", "iamb_fdr", "inter_iamb", "fast_iamb", "mmpc", "pc_stable",
@@ -65,6 +68,8 @@ __all__ = [
     "fit", "custom_fit", "bn_net", "predict", "identifiable", "singular",
     # incomplete data
     "impute", "structural_em",
+    # causal inference
+    "as_scm", "as_bn", "intervention", "mutilated", "twin", "counterfactual",
     # simulation and inference
     "cpdist", "cpquery", "query", "rbn", "set_seed",
     "gbn2mvnorm", "mvnorm2gbn",
