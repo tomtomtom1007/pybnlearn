@@ -218,6 +218,26 @@ def _check_maxp(maxp):
     return maxp
 
 
+def _check_start(start, nodes):
+    """check.bn.vs.data() for a starting network: it has to describe the same
+    variables the data do.
+
+    A network over a subset silently learned a network over that subset and
+    called it an answer, which is a wrong result rather than an error.
+    """
+    if start is None:
+        return []
+    if not isinstance(start, BayesianNetwork):
+        raise TypeError("'start' must be a BayesianNetwork")
+    if list(start.nodes) != list(nodes):
+        if len(start.nodes) != len(nodes):
+            raise ValueError(
+                "the network and the data have different numbers of "
+                f"variables: {len(start.nodes)} and {len(nodes)}")
+        raise ValueError("the network and the data have different variables")
+    return list(start.arcs)
+
+
 def build_blacklist(blacklist, whitelist):
     """build.blacklist(): reconcile the two lists.
 
@@ -572,7 +592,7 @@ def hc(data, start=None, whitelist=None, blacklist=None, score=None,
     blmat = _amat_of(blacklist)
     wlmat = _amat_of(whitelist)
 
-    arcs = list(start.arcs) if start is not None else []
+    arcs = _check_start(start, nodes)
     # whitelisted arcs are forced into the starting network, as greedy.search()
     # does before handing over to the search proper.
     for a, b in whitelist or ():
@@ -804,7 +824,7 @@ def tabu(data, start=None, whitelist=None, blacklist=None, score=None,
     blmat = _amat_of(blacklist)
     wlmat = _amat_of(whitelist)
 
-    arcs = list(start.arcs) if start is not None else []
+    arcs = _check_start(start, nodes)
     for a, b in whitelist or ():
         arcs = _set_arc(arcs, a, b)
     arcs = [(a, b) for a, b in arcs if not blmat[index[a], index[b]]]

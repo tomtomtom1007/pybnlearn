@@ -3,10 +3,11 @@
 A Python port of [bnlearn](https://www.bnlearn.com/), Marco Scutari's R package
 for Bayesian network structure learning, parameter learning and inference.
 
-> **Status: early.** Conditional independence testing, network scoring, and
-> both score-based and constraint-based structure learning work and are checked
-> against R. Much of bnlearn's API is not ported yet — see
-> [What works](#what-works).
+> **Status: pre-release.** 139 of bnlearn's 160 exported functions are ported
+> and checked against R — see [What works](#what-works) and
+> [Verified against R](#verified-against-r). What is *not* proven is the
+> packaging: only the macOS arm64 wheel has ever been built, so the Linux and
+> Windows builds are unexercised. Expect the first releases to be alphas.
 
 ## What makes this a port rather than a reimplementation
 
@@ -189,7 +190,7 @@ the fixtures pin down both halves of it.
 
 ## Verified against R
 
-`pytest` runs 3854 checks, 3716 of which compare directly against values produced
+`pytest` runs 3872 checks, 3716 of which compare directly against values produced
 by R 4.6.1 with bnlearn 5.2.1:
 
 * 318 conditional independence tests across discrete and Gaussian data, each
@@ -330,9 +331,34 @@ Rscript tools/gen_r_amat_fixtures.R
 
 ## Performance
 
-Roughly two to three times slower than R on `hc` — 0.61s vs 0.32s for the
+Roughly two to three times slower than R on `hc` — 0.64s vs 0.32s for the
 37-node `alarm` data set — because the network is marshalled into R objects
 afresh on each iteration of the search. Memory is flat across repeated runs.
+
+## Threads and processes
+
+**One call runs at a time per process.** bnlearn's C keeps its state in
+process-wide statics — the arena results are allocated in, the interned
+symbol table, the random number generator, the `jmp_buf` `error()` unwinds to
+— so every entry point takes a lock. Calling from several threads is safe;
+it does not go faster.
+
+This is bnlearn's own model rather than a limitation added here. R cannot be
+called from two threads at all, the vendored C contains no OpenMP and no
+pthreads, and bnlearn's `cluster` argument takes a `parallel::makeCluster()`
+cluster — which is separate R *processes*, each with its own memory.
+
+So for real parallelism, use processes, exactly as R does:
+
+```python
+from concurrent.futures import ProcessPoolExecutor
+
+with ProcessPoolExecutor() as pool:                  # ~ parallel::makeCluster
+    networks = list(pool.map(pybnlearn.hc, folds))
+```
+
+Each process gets its own arena and takes no lock. Seed inside the worker:
+the generator is per-process, so `set_seed` in the parent does not reach it.
 
 ## Building from source
 

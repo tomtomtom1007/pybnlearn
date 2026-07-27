@@ -18,6 +18,7 @@ Copyright (C) 2026 the pybnlearn authors.
 Licensed under the GNU General Public License version 3 or later.
 """
 
+import threading
 import warnings
 
 import numpy as np
@@ -101,11 +102,58 @@ cdef bint _initialised = False
 
 cdef void _ensure_init() noexcept:
     """onLoad() interns the symbols bnlearn caches in globals; it has to run
-    once before any entry point is called."""
+    once before any entry point is called.
+
+    Callers hold `_core_lock`, so the check and the initialisation cannot be
+    interleaved by a second thread.
+    """
     if not _initialised:
         pybn_init_constants()
         onLoad()
         _set_initialised()
+
+
+# One lock for the whole C core.
+#
+# bnlearn's C keeps its state in process-wide statics: the arena results are
+# allocated in, the list of preserved objects, the interned symbol table, the
+# random number generator, and the jmp_buf that error() unwinds to.  None of
+# it is per-thread, and the GIL does not make it safe -- the GIL is released
+# at bytecode boundaries, so a second thread reaches _arena_enter() between
+# this thread's push and its pop and the two frames interleave.  That was a
+# segfault rather than an exception: the worst way for a library to fail.
+#
+# Serialising is not a compromise here, it is the model bnlearn already has.
+# R cannot be called from two threads at all, the vendored C contains no
+# OpenMP and no pthreads, and bnlearn's own `cluster` argument takes a
+# parallel::makeCluster() cluster -- which is separate R *processes*.  The
+# Python equivalent is ProcessPoolExecutor, where each process gets its own
+# arena and needs no lock.
+#
+# Re-entrant because arena frames nest: a Search session holds one open
+# across many calls, each of which opens its own.  That also means a session
+# holds the lock for its lifetime, so Search and Tester must be used as
+# context managers -- every caller here does, and both are private.
+_core_lock = threading.RLock()
+
+
+cdef _arena_enter():
+    """Take the core lock and open an arena frame."""
+    _core_lock.acquire()
+    try:
+        _ensure_init()
+        pybn_arena_push()
+    except BaseException:
+        _core_lock.release()
+        raise
+
+
+cdef _arena_leave():
+    """Close the frame and hand the lock back."""
+    try:
+        pybn_arena_pop()
+    finally:
+        _core_lock.release()
 
 
 cdef void _set_initialised() noexcept:
@@ -411,8 +459,7 @@ def ci_test(data, x, y, sx=None, test="mi", alpha=1.0, extra_args=None):
     cdef SEXP data_sexp
     cdef SEXP complete_sexp
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
 
     try:
         data_sexp = _dataframe(data)
@@ -430,7 +477,7 @@ def ci_test(data, x, y, sx=None, test="mi", alpha=1.0, extra_args=None):
             _raw(complete_sexp),
         ])
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 
@@ -578,8 +625,7 @@ cdef class Search:
         cdef SEXP dim
         cdef int i
 
-        _ensure_init()
-        pybn_arena_push()
+        _arena_enter()
         self.live = True
 
         self.node_names = [str(v) for v in node_names]
@@ -671,7 +717,7 @@ cdef class Search:
         cdef SEXP a[13]
         if self.tabu_list == NULL:
             raise RuntimeError("enable_tabu() has not been called")
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _int_matrix(amat)
             a[1] = self.nodes
@@ -689,11 +735,11 @@ cdef class Search:
             result = _sexp_to_py(_guarded(<void *>tabu_step, a, 13))
             return None if result["op"] is False else result
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def close(self):
         if self.live:
-            pybn_arena_pop()
+            _arena_leave()
             self.live = False
 
     def __enter__(self):
@@ -728,18 +774,18 @@ cdef class Search:
 
     def arcs_to_amat(self, arcs):
         cdef SEXP a[2]
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _arcs_sexp(arcs)
             a[1] = self.nodes
             return _read_int_matrix(
                 _guarded(<void *>arcs2amat, a, 2), self.n, self.n)
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def acyclic(self, arcs, bint directed=True):
         cdef SEXP a[5]
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _arcs_sexp(arcs)
             a[1] = self.nodes
@@ -748,7 +794,7 @@ cdef class Search:
             a[4] = Rf_ScalarLogical(0)
             return bool(LOGICAL(_guarded(<void *>is_acyclic, a, 5))[0])
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     # -- scoring ------------------------------------------------------------
 
@@ -778,7 +824,7 @@ cdef class Search:
         """per.node.score(): each target node's contribution to the score."""
         cdef SEXP a[6]
         targets = [str(t) for t in targets]
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = self._network(arcs)
             a[1] = self.data
@@ -789,13 +835,13 @@ cdef class Search:
             return _read_real(
                 _guarded(<void *>per_node_score, a, 6), len(targets))
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def fill_cache(self, arcs, updated, amat, bint equivalence,
                    bint decomposability):
         """score_cache_fill(): refresh the cached score deltas in place."""
         cdef SEXP a[13]
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = self.nodes
             a[1] = self.data
@@ -812,12 +858,12 @@ cdef class Search:
             a[12] = Rf_ScalarLogical(0)
             _guarded(<void *>score_cache_fill, a, 13)
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def to_be_added(self, amat, nparents, double maxp):
         """hc_to_be_added(): which arcs are candidates for addition."""
         cdef SEXP a[7]
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _int_matrix(amat)
             a[1] = self.blmat
@@ -831,7 +877,7 @@ cdef class Search:
             return _read_int_matrix(
                 _guarded(<void *>hc_to_be_added, a, 7), self.n, self.n)
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def best_step(self, amat, added, nparents, double maxp):
         """hc_opt_step(): the best single arc operation, or None if none of
@@ -842,7 +888,7 @@ cdef class Search:
         their own copy.
         """
         cdef SEXP a[10]
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _int_matrix(amat)
             a[1] = self.nodes
@@ -858,7 +904,7 @@ cdef class Search:
             # bnlearn signals "nothing improved the score" with op = FALSE.
             return None if result["op"] is False else result
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -907,8 +953,7 @@ def topological_order(node_names, arcs):
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         bn = _bn_object(node_names, arcs)
 
@@ -927,7 +972,7 @@ def topological_order(node_names, arcs):
         # sorts into a plausible-looking but wrong order.
         depth_by_node = _sexp_to_py(depths)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
     names = list(depth_by_node)
     values = np.asarray([depth_by_node[k] for k in names])
@@ -982,8 +1027,7 @@ cdef class Tester:
         self.live = False
 
     def __init__(self, data, test, extra_args=None):
-        _ensure_init()
-        pybn_arena_push()
+        _arena_enter()
         self.live = True
 
         self.node_names = [str(c) for c in data.columns]
@@ -996,7 +1040,7 @@ cdef class Tester:
 
     def close(self):
         if self.live:
-            pybn_arena_pop()
+            _arena_leave()
             self.live = False
 
     def __enter__(self):
@@ -1010,7 +1054,7 @@ cdef class Tester:
         """indep.test() in learning mode: just the p-value."""
         cdef SEXP a[9]
         cdef SEXP out
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _str_vector([str(x)])
             a[1] = _str_vector([str(y)])
@@ -1024,7 +1068,7 @@ cdef class Tester:
             out = _guarded(<void *>indep_test, a, 9)
             return REAL(out)[0]
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def pvalues(self, xs, y, sx=None):
         """indep.test() with a vector of candidates: the p-value of each x
@@ -1036,7 +1080,7 @@ cdef class Tester:
         xs = [str(v) for v in xs]
         if not xs:
             return {}
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _str_vector(xs)
             a[1] = _str_vector([str(y)])
@@ -1050,7 +1094,7 @@ cdef class Tester:
             out = _guarded(<void *>indep_test, a, 9)
             return {xs[i]: REAL(out)[i] for i in range(len(xs))}
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def roundrobin(self, x, z, fixed=None, double alpha=1.0):
         """roundrobin.test(): test x against each element of z given the rest,
@@ -1060,7 +1104,7 @@ cdef class Tester:
         z = [str(v) for v in (z or [])]
         if not z:
             return {}
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _str_vector([str(x)])
             a[1] = _str_vector(z)
@@ -1074,7 +1118,7 @@ cdef class Tester:
             out = _guarded(<void *>roundrobin_test, a, 9)
             return _sexp_to_py(out)
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
     def allsubs(self, x, y, sx=None, fixed=None, double alpha=1.0,
                 int min=0, int max=-1):
@@ -1092,7 +1136,7 @@ cdef class Tester:
             max = len(sx)
         max = min_int(max, len(sx))
 
-        pybn_arena_push()
+        _arena_enter()
         try:
             a[0] = _str_vector([str(x)])
             a[1] = _str_vector([str(y)])
@@ -1120,7 +1164,7 @@ cdef class Tester:
                       for i in range(Rf_length(dsep))])
             return result
         finally:
-            pybn_arena_pop()
+            _arena_leave()
 
 
 cdef int min_int(int a, int b):
@@ -1141,8 +1185,7 @@ def recover_structure(structure, node_names, bint markov_blankets,
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         bn = Rf_allocVector(VECSXP, len(node_names))
         for i, name in enumerate(node_names):
@@ -1169,7 +1212,7 @@ def recover_structure(structure, node_names, bint markov_blankets,
         # for a variable named "M. Work" the caller sees "M".
         return _read_node_sets(out, node_names, markov_blankets)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef object _strings(SEXP x):
@@ -1206,8 +1249,7 @@ def cpdag_arcs(arcs, node_names, whitelist=None, blacklist=None,
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         nodes = _str_vector(node_names)
         a[0] = _arcs_sexp(arcs)
@@ -1225,7 +1267,7 @@ def cpdag_arcs(arcs, node_names, whitelist=None, blacklist=None,
         a[1] = nodes
         return _arcs_from_sexp(_guarded(<void *>amat2arcs, a, 2))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -1253,15 +1295,14 @@ def undirected_arcs(node_names, arcs, bint moral=False):
     cdef SEXP a[3]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _bn_object(node_names, arcs)
         a[1] = Rf_ScalarLogical(1 if moral else 0)
         a[2] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>dag2ug, a, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def structural_hamming(node_names, learned_arcs, true_arcs):
@@ -1270,8 +1311,7 @@ def structural_hamming(node_names, learned_arcs, true_arcs):
     cdef SEXP out
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _bn_object(node_names, learned_arcs)
         a[1] = _bn_object(node_names, true_arcs)
@@ -1279,7 +1319,7 @@ def structural_hamming(node_names, learned_arcs, true_arcs):
         out = _guarded(<void *>shd, a, 3)
         return int(REAL(out)[0]) if TYPEOF(out) == REALSXP else INTEGER(out)[0]
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def extend_pdag(arcs, ordering):
@@ -1288,14 +1328,13 @@ def extend_pdag(arcs, ordering):
     cdef SEXP a[2]
     ordering = [str(v) for v in ordering]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs)
         a[1] = _str_vector(ordering)
         return _arcs_from_sexp(_guarded(<void *>pdag2dag, a, 2))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def count_parameters(node_names, arcs, data, estimator="bic"):
@@ -1304,8 +1343,7 @@ def count_parameters(node_names, arcs, data, estimator="bic"):
     cdef SEXP out
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _bn_object(node_names, arcs)
         a[1] = _dataframe(data)
@@ -1315,7 +1353,7 @@ def count_parameters(node_names, arcs, data, estimator="bic"):
         return float(REAL(out)[0]) if TYPEOF(out) == REALSXP \
             else float(INTEGER(out)[0])
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def chow_liu_arcs(data, node_names, estimator, whitelist=None, blacklist=None,
@@ -1329,8 +1367,7 @@ def chow_liu_arcs(data, node_names, estimator, whitelist=None, blacklist=None,
     cdef SEXP a[8]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = _str_vector(node_names)
@@ -1344,7 +1381,7 @@ def chow_liu_arcs(data, node_names, estimator, whitelist=None, blacklist=None,
         a[7] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>chow_liu, a, 8))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef extern SEXP tree_directions(SEXP arcs, SEXP nodes, SEXP root, SEXP debug)
@@ -1355,8 +1392,7 @@ def orient_tree(arcs, node_names, root):
     cdef SEXP a[4]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs)
         a[1] = _str_vector(node_names)
@@ -1364,7 +1400,7 @@ def orient_tree(arcs, node_names, root):
         a[3] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>tree_directions, a, 4))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def aracne_arcs(data, estimator, whitelist=None, blacklist=None):
@@ -1373,8 +1409,7 @@ def aracne_arcs(data, estimator, whitelist=None, blacklist=None):
     cdef SEXP a[6]
     node_names = [str(c) for c in data.columns]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = _py_to_sexp(str(estimator))
@@ -1384,7 +1419,7 @@ def aracne_arcs(data, estimator, whitelist=None, blacklist=None):
         a[5] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>aracne, a, 6))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def neighbourhoods(node_names, arcs):
@@ -1401,8 +1436,7 @@ def neighbourhoods(node_names, arcs):
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         nodes = _str_vector(node_names)
         a2[0] = _arcs_sexp(arcs)
@@ -1424,7 +1458,7 @@ def neighbourhoods(node_names, arcs):
             }
         return result
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def complement_arcs(arcs, node_names, whitelist=None):
@@ -1436,8 +1470,7 @@ def complement_arcs(arcs, node_names, whitelist=None):
     cdef SEXP a[7]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
         a[1] = R_NilValue
@@ -1448,7 +1481,7 @@ def complement_arcs(arcs, node_names, whitelist=None):
         a[6] = Rf_ScalarLogical(1)
         return _arcs_from_sexp(_guarded(<void *>hc_to_be_added, a, 7))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef extern SEXP pdag_extension(SEXP arcs, SEXP nodes, SEXP debug)
@@ -1464,15 +1497,14 @@ def consistent_extension(arcs, node_names):
     cdef SEXP a[3]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs)
         a[1] = _str_vector(node_names)
         a[2] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>pdag_extension, a, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -1533,8 +1565,7 @@ def discrete_parameters(data, node, parents, iss=None,
     """
     cdef SEXP a[6]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = _str_vector([str(node)])
@@ -1545,7 +1576,7 @@ def discrete_parameters(data, node, parents, iss=None,
         return _read_table(
             _guarded(<void *>classic_discrete_parameters, a, 6))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def gaussian_parameters(data, node, parents, bint keep_fitted=True,
@@ -1555,8 +1586,7 @@ def gaussian_parameters(data, node, parents, bint keep_fitted=True,
     cdef SEXP a[6]
     cdef SEXP out
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = _str_vector([str(node)])
@@ -1567,7 +1597,7 @@ def gaussian_parameters(data, node, parents, bint keep_fitted=True,
         out = _guarded(<void *>gaussian_ols_parameters, a, 6)
         return _sexp_to_py(out)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -1791,8 +1821,7 @@ def random_sample(fitted, int n, fix=None):
     """
     cdef SEXP a[5]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _fitted_sexp(fitted)
         a[1] = Rf_ScalarInteger(n)
@@ -1801,7 +1830,7 @@ def random_sample(fitted, int n, fix=None):
         a[4] = Rf_ScalarLogical(0)
         return _dataframe_to_py(_guarded(<void *>rbn_master, a, 5))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def weighted_sample(fitted, nodes, int n, fix=None):
@@ -1810,8 +1839,7 @@ def weighted_sample(fitted, nodes, int n, fix=None):
     cdef SEXP a[5]
     cdef SEXP out
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _fitted_sexp(fitted)
         a[1] = _str_vector([str(v) for v in nodes])
@@ -1825,13 +1853,19 @@ def weighted_sample(fitted, nodes, int n, fix=None):
                 None if weights == R_NilValue
                 else _read_real(weights, Rf_length(weights)))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def set_seed(unsigned int seed):
-    """Seed the generator, reproducing R's set.seed() exactly."""
-    _ensure_init()
-    pybn_set_seed(seed)
+    """Seed the generator, reproducing R's set.seed() exactly.
+
+    The generator is process-wide, like R's, so this takes the core lock even
+    though it allocates nothing: seeding while another thread is drawing
+    would give that thread numbers from a stream it did not ask for.
+    """
+    with _core_lock:
+        _ensure_init()
+        pybn_set_seed(seed)
 
 
 # ---------------------------------------------------------------------------
@@ -1859,23 +1893,28 @@ def sample_indices(int n, int k, bint replace=False):
     cdef cnp.ndarray[cnp.int32_t, ndim=1] pool
     cdef int i, j, left = n
 
-    _ensure_init()
-
-    if replace or k < 2:
-        for i in range(k):
-            out[i] = <int>(R_unif_index(n) + 1)
-        return out
-
-    if k > n:
+    if k > n and not (replace or k < 2):
         raise ValueError("cannot take a sample larger than the population "
                          "when replace is False")
 
-    pool = np.arange(n, dtype=np.int32)
-    for i in range(k):
-        j = <int>R_unif_index(left)
-        out[i] = pool[j] + 1
-        left -= 1
-        pool[j] = pool[left]
+    # The whole draw is one critical section, not one per number: a sample
+    # interleaved with another thread's is still a sample, but it is not the
+    # sample R's generator would have produced, and every bootstrap here
+    # depends on it being exactly that.
+    with _core_lock:
+        _ensure_init()
+
+        if replace or k < 2:
+            for i in range(k):
+                out[i] = <int>(R_unif_index(n) + 1)
+            return out
+
+        pool = np.arange(n, dtype=np.int32)
+        for i in range(k):
+            j = <int>R_unif_index(left)
+            out[i] = pool[j] + 1
+            left -= 1
+            pool[j] = pool[left]
 
     return out
 
@@ -1891,8 +1930,7 @@ def arc_strength_counters(prob, arcs, node_names, double weight=1.0):
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         counters = Rf_allocVector(REALSXP, n * n)
         flat = np.ascontiguousarray(np.asarray(prob, dtype=np.float64)
@@ -1916,7 +1954,7 @@ def arc_strength_counters(prob, arcs, node_names, double weight=1.0):
                 out[i, j] = REAL(counters)[j * n + i]
         return out
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def arc_strength_coefficients(prob, node_names):
@@ -1929,8 +1967,7 @@ def arc_strength_coefficients(prob, node_names):
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         counters = Rf_allocVector(REALSXP, n * n)
         flat = np.ascontiguousarray(np.asarray(prob, dtype=np.float64)
@@ -1947,7 +1984,7 @@ def arc_strength_coefficients(prob, node_names):
         return _dataframe_to_py(
             _guarded(<void *>bootstrap_arc_coefficients, a, 2))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef extern SEXP loglikelihood_function(SEXP fitted, SEXP data,
@@ -1963,8 +2000,7 @@ def network_loglikelihood(fitted, data, keep=None, bint by_sample=False):
     cdef SEXP a[6]
     cdef SEXP out, nobs
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _fitted_sexp(fitted)
         a[1] = _dataframe(data)
@@ -1982,7 +2018,7 @@ def network_loglikelihood(fitted, data, keep=None, bint by_sample=False):
             "nobs": float(REAL(nobs)[0]) if nobs != R_NilValue else len(data),
         }
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -2035,8 +2071,7 @@ def predict_parents(fitted, node, data, bint prob=False):
     conditional distribution given its parents' observed values."""
     cdef SEXP a[5]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _fitted_sexp(fitted)
         a[1] = _str_vector([str(node)])
@@ -2046,7 +2081,7 @@ def predict_parents(fitted, node, data, bint prob=False):
         return _read_prediction(
             _guarded(<void *>predict_from_parents, a, 5), prob)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def predict_bayes_lw(fitted, node, data, predictors, int n=500,
@@ -2055,8 +2090,7 @@ def predict_bayes_lw(fitted, node, data, predictors, int n=500,
     by likelihood weighting over the other observed variables."""
     cdef SEXP a[7]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _str_vector([str(node)])
         a[1] = _fitted_sexp(fitted)
@@ -2068,7 +2102,7 @@ def predict_bayes_lw(fitted, node, data, predictors, int n=500,
         return _read_prediction(
             _guarded(<void *>predict_map_lw, a, 7), prob)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef extern SEXP naivepred(SEXP fitted, SEXP data, SEXP training, SEXP prior,
@@ -2085,8 +2119,7 @@ def predict_classifier(fitted, training, data, prior, bint prob=False):
     cdef SEXP a[6]
     cdef int index = list(fitted.nodes).index(str(training)) + 1
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _fitted_sexp(fitted)
         a[1] = _dataframe(data)
@@ -2096,7 +2129,7 @@ def predict_classifier(fitted, training, data, prior, bint prob=False):
         a[5] = Rf_ScalarLogical(0)
         return _read_prediction(_guarded(<void *>naivepred, a, 6), prob)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef extern SEXP configurations(SEXP data, SEXP factor, SEXP all)
@@ -2110,15 +2143,14 @@ def parent_configurations(data):
     of the given discrete columns, in the order the C code expects them."""
     cdef SEXP a[3]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = Rf_ScalarLogical(1)
         a[2] = Rf_ScalarLogical(1)
         return _read_column(_guarded(<void *>configurations, a, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def conditional_gaussian_parameters(data, node, continuous_parents, configs,
@@ -2130,8 +2162,7 @@ def conditional_gaussian_parameters(data, node, continuous_parents, configs,
     cdef SEXP a[7]
     cdef SEXP out
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = _str_vector([str(node)])
@@ -2165,7 +2196,7 @@ def conditional_gaussian_parameters(data, node, continuous_parents, configs,
             result[name] = _sexp_to_py(entry)
         return result
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef object _read_real_vector(SEXP x):
@@ -2210,14 +2241,13 @@ def arcs_to_amat(arcs, node_names):
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs)
         a[1] = _str_vector(node_names)
         return _read_int_matrix(_guarded(<void *>arcs2amat, a, 2), n, n)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def amat_to_arcs(matrix, node_names):
@@ -2231,8 +2261,7 @@ def amat_to_arcs(matrix, node_names):
     m = np.ascontiguousarray(np.asarray(matrix, dtype=np.int32))
     n = m.shape[0]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         amat = Rf_allocVector(INTSXP, n * n)
         for j in range(n):
@@ -2247,7 +2276,7 @@ def amat_to_arcs(matrix, node_names):
         a[1] = _str_vector(node_names)
         return _arcs_from_sexp(_guarded(<void *>amat2arcs, a, 2))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -2269,15 +2298,14 @@ def which_arcs_undirected(arcs, node_names):
     if not arcs:
         return np.zeros(0, dtype=bool)
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs)
         a[1] = _str_vector([str(v) for v in node_names])
         return np.asarray(_sexp_to_py(_guarded(<void *>which_undirected, a, 2)),
                           dtype=bool).reshape(-1)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def averaged_arcs(arcs, node_names, weights):
@@ -2294,8 +2322,7 @@ def averaged_arcs(arcs, node_names, weights):
 
     weights = np.asarray(weights, dtype=np.float64)
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs)
         a[1] = _str_vector([str(v) for v in node_names])
@@ -2306,7 +2333,7 @@ def averaged_arcs(arcs, node_names, weights):
         return _arcs_from_sexp(
             _guarded(<void *>smart_network_averaging, a, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -2331,8 +2358,7 @@ def acyclic(node_names, arcs, bint directed=False):
     cdef SEXP a[5]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
         a[1] = _str_vector(node_names)
@@ -2341,7 +2367,7 @@ def acyclic(node_names, arcs, bint directed=False):
         a[4] = Rf_ScalarLogical(0)
         return bool(_sexp_to_py(_guarded(<void *>is_acyclic, a, 5)))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def path_exists(node_names, arcs, frm, to, bint direct=True,
@@ -2358,8 +2384,7 @@ def path_exists(node_names, arcs, frm, to, bint direct=True,
     node_names = [str(v) for v in node_names]
     index = {node: i for i, node in enumerate(node_names)}
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a2[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
         a2[1] = _str_vector(node_names)
@@ -2375,7 +2400,7 @@ def path_exists(node_names, arcs, frm, to, bint direct=True,
         a[7] = Rf_ScalarLogical(0)
         return bool(_sexp_to_py(_guarded(<void *>has_pdag_path, a, 8)))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def components(node_names, arcs):
@@ -2383,14 +2408,13 @@ def components(node_names, arcs):
     cdef SEXP a[2]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _bn_object(node_names, arcs)
         a[1] = Rf_ScalarLogical(0)
         return _sexp_to_py(_guarded(<void *>connected_components, a, 2))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def tier_blacklist(groups):
@@ -2406,8 +2430,7 @@ def tier_blacklist(groups):
     groups = [[str(v) for v in ([g] if isinstance(g, str) else g)]
               for g in groups]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         if all(len(g) == 1 for g in groups):
             a[0] = _str_vector([g[0] for g in groups])
@@ -2421,7 +2444,7 @@ def tier_blacklist(groups):
         a[1] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>tiers, a, 2))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def node_structure(node_names, arcs):
@@ -2433,8 +2456,7 @@ def node_structure(node_names, arcs):
 
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a2[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
         a2[1] = _str_vector(node_names)
@@ -2445,7 +2467,7 @@ def node_structure(node_names, arcs):
         a3[2] = Rf_ScalarLogical(0)
         return _sexp_to_py(_guarded(<void *>cache_structure, a3, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -2478,8 +2500,7 @@ def collider_triples(node_names, arcs, bint shielded=True,
     cdef SEXP a[6]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs) if arcs else _str_vector([])
         a[1] = _str_vector(node_names)
@@ -2489,7 +2510,7 @@ def collider_triples(node_names, arcs, bint shielded=True,
         a[5] = Rf_ScalarLogical(0)
         return _string_matrix_rows(_guarded(<void *>colliders, a, 6), 3)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef object _string_matrix_rows(SEXP x, int ncol):
@@ -2515,15 +2536,14 @@ def intervention_distance(node_names, learned_arcs, true_arcs):
     cdef SEXP a[3]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _bn_object(node_names, learned_arcs)
         a[1] = _bn_object(node_names, true_arcs)
         a[2] = Rf_ScalarLogical(0)
         return _sexp_to_py(_guarded(<void *>sid, a, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def alpha_star_value(node_names, arcs, data):
@@ -2532,15 +2552,14 @@ def alpha_star_value(node_names, arcs, data):
     cdef SEXP a[3]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _bn_object(node_names, arcs)
         a[1] = _dataframe(data)
         a[2] = Rf_ScalarLogical(0)
         return float(_sexp_to_py(_guarded(<void *>alpha_star, a, 3)))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef object _graph_list(SEXP result, object node_names, int num):
@@ -2577,8 +2596,7 @@ def ordered_graphs(node_names, int num, double prob):
     cdef SEXP a[3]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _str_vector(node_names)
         a[1] = Rf_ScalarInteger(num)
@@ -2586,7 +2604,7 @@ def ordered_graphs(node_names, int num, double prob):
         return _graph_list(_guarded(<void *>ordered_graph, a, 3),
                            node_names, num)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def ide_cozman_graphs(node_names, int num, int burn_in, double max_in_degree,
@@ -2597,8 +2615,7 @@ def ide_cozman_graphs(node_names, int num, int burn_in, double max_in_degree,
     cdef SEXP a[8]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _str_vector(node_names)
         a[1] = Rf_ScalarInteger(num)
@@ -2611,7 +2628,7 @@ def ide_cozman_graphs(node_names, int num, int burn_in, double max_in_degree,
         return _graph_list(_guarded(<void *>ide_cozman_graph, a, 8),
                            node_names, num)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def discretize_marginal(data, method, breaks, ordered):
@@ -2623,8 +2640,7 @@ def discretize_marginal(data, method, breaks, ordered):
     breaks = [int(b) for b in breaks]
     ordered = [bool(o) for o in ordered]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = _str_vector([str(method)])
@@ -2639,7 +2655,7 @@ def discretize_marginal(data, method, breaks, ordered):
         return _dataframe_to_py(
             _guarded(<void *>marginal_discretize, a, 5))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def discretize_joint(data, method, breaks, ordered, initial, initial_breaks):
@@ -2657,8 +2673,7 @@ def discretize_joint(data, method, breaks, ordered, initial, initial_breaks):
     breaks = [int(b) for b in breaks]
     ordered = [bool(o) for o in ordered]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = _str_vector([str(method)])
@@ -2677,7 +2692,7 @@ def discretize_joint(data, method, breaks, ordered, initial, initial_breaks):
         a[6] = Rf_ScalarLogical(0)
         return _dataframe_to_py(_guarded(<void *>joint_discretize, a, 7))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def configuration_factor(data, bint all=True):
@@ -2685,15 +2700,14 @@ def configuration_factor(data, bint all=True):
     variables, as a single factor."""
     cdef SEXP a[3]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = Rf_ScalarLogical(1)
         a[2] = Rf_ScalarLogical(1 if all else 0)
         return _read_column(_guarded(<void *>configurations, a, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef extern SEXP unique_arcs(SEXP arcs, SEXP nodes, SEXP warn)
@@ -2707,15 +2721,14 @@ def deduplicate_arcs(arcs, node_names):
     if not arcs:
         return []
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _arcs_sexp(arcs)
         a[1] = _str_vector(node_names)
         a[2] = Rf_ScalarLogical(0)
         return _arcs_from_sexp(_guarded(<void *>unique_arcs, a, 3))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -2733,37 +2746,34 @@ cdef extern SEXP dedup(SEXP data, SEXP threshold, SEXP complete, SEXP debug)
 
 def test_counter():
     """How many tests or scores have been evaluated since the last reset."""
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         return int(_sexp_to_py(c_get_test_counter()))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def reset_test_counter():
     """Set the counter back to zero."""
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         c_reset_test_counter()
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def increment_test_counter(int n=1):
     """Add to the counter, for work the C code does not count itself."""
     cdef SEXP amount
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         amount = Rf_ScalarReal(n)
         # the C returns NULL rather than the new value.
         c_increment_test_counter(amount)
         return int(_sexp_to_py(c_get_test_counter()))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 def dedup_columns(data, double threshold):
@@ -2773,8 +2783,7 @@ def dedup_columns(data, double threshold):
     cdef SEXP complete
     cdef int i
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         a[0] = _dataframe(data)
         a[1] = Rf_ScalarReal(threshold)
@@ -2785,7 +2794,7 @@ def dedup_columns(data, double threshold):
         a[3] = Rf_ScalarLogical(0)
         return _dataframe_to_py(_guarded(<void *>dedup, a, 4))
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 # ---------------------------------------------------------------------------
@@ -2854,8 +2863,7 @@ def complete_castelo_prior(frm, to, prob, node_names, bint learning=False):
     prob = [float(v) for v in prob]
     node_names = [str(v) for v in node_names]
 
-    _ensure_init()
-    pybn_arena_push()
+    _arena_enter()
     try:
         frame = Rf_allocVector(VECSXP, 3)
         Rf_SET_VECTOR_ELT(frame, 0, _str_vector(frm))
@@ -2877,7 +2885,7 @@ def complete_castelo_prior(frm, to, prob, node_names, bint learning=False):
                              completed["aid"], completed["fwd"],
                              completed["bkwd"], node_names)
     finally:
-        pybn_arena_pop()
+        _arena_leave()
 
 
 cdef SEXP _castelo_sexp(object prior) except? NULL:
